@@ -12,7 +12,7 @@ impl NullBackend {
 }
 
 impl AudioBackend for NullBackend {
-    fn write(&self, stream_id: u32) -> Result<()> {
+    fn write(&self, stream_id: u32, req: &Vec<u8>) -> Result<()> {
         println!("null backend, writting to stream: {}", stream_id);
         Ok(())
     }

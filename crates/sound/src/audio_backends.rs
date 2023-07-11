@@ -13,7 +13,7 @@ use self::pw_backend::{PwBackend, PCMParams};
 use crate::{Error, Result};
 
 pub trait AudioBackend {
-    fn write(&self, stream_id: u32) -> Result<()>;
+    fn write(&self, stream_id: u32, req: &Vec<u8>) -> Result<()>;
     fn read(&self, stream_id: u32) -> Result<()>;
 
     fn set_param(&self, _stream_id: u32, _params: PCMParams) -> Result<()> {

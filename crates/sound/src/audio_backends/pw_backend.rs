@@ -2,19 +2,27 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use super::AudioBackend;
+use std::os::raw::c_void;
+use std::cmp;
 use crate::Result;
 use std::ops::Deref;
 use std::ptr;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
-use pipewire as pw;
-use pw::sys::{pw_loop, pw_thread_loop_new, pw_thread_loop_signal, PW_ID_CORE};
-use pw::sys::{pw_thread_loop, pw_thread_loop_start, pw_thread_loop_wait};
-use pw::sys::{pw_thread_loop_get_loop, pw_thread_loop_lock, pw_thread_loop_unlock};
-use pw::Core;
-use pw::LoopRef;
+use pw::stream::ListenerBuilderT;
 use vm_memory::Le32;
+use pipewire as pw;
+use pw::sys::{pw_loop, PW_ID_CORE};
+use pw::{sys::*, Core};
+use pw::LoopRef;
+use pw::{properties, spa};
+
+use libspa_sys::{spa_format_audio_raw_build, spa_pod_builder, spa_callbacks, spa_pod_builder_state};
+use libspa_sys::{spa_audio_info_raw, spa_pod, SPA_PARAM_EnumFormat};
+use libspa_sys::SPA_AUDIO_FORMAT_S16;
+use libspa_sys::SPA_AUDIO_CHANNEL_FL;
+use libspa_sys::SPA_AUDIO_CHANNEL_FR;
 
 #[derive(Default, Debug)]
 pub struct PCMParams {
@@ -102,7 +110,6 @@ unsafe impl Send for PwBackend {}
 // SAFETY: Safe as the structure can be shared with another thread as the state
 // is protected with a lock.
 unsafe impl Sync for PwBackend {}
-
 pub struct PwBackend {
     //pub streams: Arc<RwLock<Vec<StreamInfo>>>,
     pub thread_loop: Arc<PwThreadLoop>,
@@ -147,7 +154,10 @@ impl PwBackend {
 }
 
 impl AudioBackend for PwBackend {
-    fn write(&self, stream_id: u32) -> Result<()> {
+    fn write(&self, stream_id: u32, req: &Vec<u8>) -> Result<()> {
+        self.thread_loop.lock();
+        //let stream = pw::stream::Stream::<i32>::new(core, name, properties)
+
         println!("pipewire backend, writting to stream: {}", stream_id);
         Ok(())
     }
@@ -162,6 +172,82 @@ impl AudioBackend for PwBackend {
         Ok(())
     }
     fn set_param(&self, _stream_id: u32, _params: PCMParams) -> Result<()> {
+        Ok(())
+    }
+    fn prepare(&self, _stream_id: u32) -> Result<()> {
+        self.thread_loop.lock();
+
+        let mut buff = [0; 1024];
+        let p_buff = &mut buff as *mut i32 as *mut c_void;
+
+        let mut b = spa_pod_builder {
+            data : p_buff,
+            size: buff.len() as u32,
+            _padding : 0,
+            callbacks : spa_callbacks {
+                funcs: std::ptr::null(),
+                data: std::ptr::null_mut()
+            },
+            state: spa_pod_builder_state {
+                offset : 0,
+                flags: 0,
+                frame: std::ptr::null_mut()
+            }
+        };
+        let mut pos: [u32; 64] = [0; 64];
+
+        pos[0] = SPA_AUDIO_CHANNEL_FL;
+        pos[1] = SPA_AUDIO_CHANNEL_FR;
+        let mut info = spa_audio_info_raw {
+            format : SPA_AUDIO_FORMAT_S16,
+            rate : 44100,
+            flags : 0,
+            channels : 2,
+            position : pos
+        };
+        let param : *mut spa_pod =
+        unsafe {
+            let p = spa_format_audio_raw_build(&mut b, SPA_PARAM_EnumFormat, &mut info);
+                p
+        };
+        let mut stream = pw::stream::Stream::<i32>::new(
+            &self.core,
+            "audio-output",
+            properties! {
+                *pw::keys::MEDIA_TYPE => "Audio",
+                *pw::keys::MEDIA_CATEGORY => "Playback",
+                *pw::keys::MEDIA_ROLE => "Music",
+            },
+        ).expect("could not create new stream");
+        
+        stream.add_local_listener_with_user_data(
+            0,
+        ).state_changed(|old, new| {
+            println!("State changed: {:?} -> {:?}", old, new);
+        }).process(move |stream, _data| {
+            unsafe {
+                let b: *mut pw_buffer = stream.dequeue_raw_buffer();
+                if b.is_null() { return; }
+                let buf = (*b).buffer;
+                let frame_size = info.channels;
+                let req = (*b).requested * (frame_size as u64);
+                let mut datas = (*buf).datas;
+                let n_bytes = cmp::min(req as u32, (*datas).maxsize);
+                
+                (*(*datas).chunk).offset = 0;
+                (*(*datas).chunk).stride = frame_size as i32;
+                (*(*datas).chunk).size = n_bytes as u32;
+
+                stream.queue_raw_buffer(b);
+            }
+        });
+
+        stream.connect(
+            spa::Direction::Output,
+            Some(pipewire::constants::ID_ANY),
+            pw::stream::StreamFlags::RT_PROCESS | pw::stream::StreamFlags::AUTOCONNECT | pw::stream::StreamFlags::MAP_BUFFERS,
+            &mut [param],).expect("could not connect to the stream");
+        
         Ok(())
     }
 }

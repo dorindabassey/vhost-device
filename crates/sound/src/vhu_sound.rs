@@ -18,7 +18,7 @@ use vmm_sys_util::{
     eventfd::{EventFd, EFD_NONBLOCK},
 };
 
-use crate::audio_backends::{alloc_audio_backend, AudioBackend};
+use crate::audio_backends::{alloc_audio_backend, AudioBackend, self};
 use crate::virtio_sound::*;
 use crate::{Error, Result, SoundConfig};
 use vm_memory::{Le32, Le64};
@@ -113,14 +113,14 @@ impl VhostUserSoundThread {
                     // new requests on the queue.
                     loop {
                         vring.disable_notification().unwrap();
-                        self.process_control(vring, stream_info)?;
+                        self.process_control(vring, stream_info, &audio_backend)?;
                         if !vring.enable_notification().unwrap() {
                             break;
                         }
                     }
                 } else {
                     // Without EVENT_IDX, a single call is enough.
-                    self.process_control(vring, stream_info)?;
+                    self.process_control(vring, stream_info, &audio_backend)?;
                 }
             }
             EVENT_QUEUE_IDX => {
@@ -156,7 +156,7 @@ impl VhostUserSoundThread {
     }
 
     /// Process the messages in the vring and dispatch replies
-    fn process_control(&self, vring: &VringRwLock, stream_info: &[StreamInfo]) -> Result<bool> {
+    fn process_control(&self, vring: &VringRwLock, stream_info: &[StreamInfo], audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>) -> Result<bool> {
         let requests: Vec<SndDescriptorChain> = vring
             .get_mut()
             .get_queue_mut()
@@ -299,16 +299,38 @@ impl VhostUserSoundThread {
                                 .write_obj(VIRTIO_SND_S_BAD_MSG, desc_response.addr())
                                 .map_err(|_| Error::DescriptorWriteFailed)?;
                     }
-                    desc_chain
-                        .memory()
-                        .write_obj(response, desc_response.addr())
-                        .map_err(|_| Error::DescriptorWriteFailed)?;
-                    len = desc_response.len() as u32;
+                    continue;
                 },
-                VIRTIO_SND_R_PCM_PREPARE
-                | VIRTIO_SND_R_PCM_START
-                | VIRTIO_SND_R_PCM_STOP
-                | VIRTIO_SND_R_PCM_RELEASE => {
+                VIRTIO_SND_R_PCM_PREPARE => {
+                    let pcm_hdr = desc_chain
+                        .memory()
+                        .read_obj::<VirtioSoundPcmHeader>(desc_request.addr())
+                        .map_err(|_| Error::DescriptorReadFailed)?;
+                    let stream_id: u32 = u32::from(pcm_hdr.stream_id);
+                    dbg!("stream_id: {}", stream_id );
+
+                    if audio_backend.read().unwrap().prepare(stream_id)
+                        .is_err(){
+                        return Err(Error::HandleEventNotEpollIn.into());
+                        }
+                }
+                VIRTIO_SND_R_PCM_START => {
+                    let pcm_hdr = desc_chain
+                        .memory()
+                        .read_obj::<VirtioSoundPcmHeader>(desc_request.addr())
+                        .map_err(|_| Error::DescriptorReadFailed)?;
+                    let stream_id: usize = u32::from(pcm_hdr.stream_id) as usize;
+                    dbg!("stream_id: {}", stream_id );
+                }
+                VIRTIO_SND_R_PCM_STOP => {
+                    let pcm_hdr = desc_chain
+                        .memory()
+                        .read_obj::<VirtioSoundPcmHeader>(desc_request.addr())
+                        .map_err(|_| Error::DescriptorReadFailed)?;
+                    let stream_id: usize = u32::from(pcm_hdr.stream_id) as usize;
+                    dbg!("stream_id: {}", stream_id );
+                }
+                VIRTIO_SND_R_PCM_RELEASE => {
                     let pcm_hdr = desc_chain
                         .memory()
                         .read_obj::<VirtioSoundPcmHeader>(desc_request.addr())
@@ -316,11 +338,7 @@ impl VhostUserSoundThread {
                     let stream_id: usize = u32::from(pcm_hdr.stream_id) as usize;
                     dbg!("stream_id: {}", stream_id );
 
-                    desc_chain
-                        .memory()
-                        .write_obj(response, desc_response.addr())
-                        .map_err(|_| Error::DescriptorWriteFailed)?;
-                    len = desc_response.len() as u32;
+                    continue;
                 },
                 _ => {
                     error!(
@@ -329,6 +347,11 @@ impl VhostUserSoundThread {
                     );
                 }
             };
+            desc_chain
+                .memory()
+                .write_obj(response, desc_response.addr())
+                .map_err(|_| Error::DescriptorWriteFailed)?;
+            len = desc_response.len() as u32;
             if vring
                 .add_used(desc_chain.head_index(), len)
                 .is_err()
@@ -350,7 +373,7 @@ impl VhostUserSoundThread {
         Ok(false)
     }
 
-    fn process_tx(&self, vring: &VringRwLock, _audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>) -> Result<bool> {
+    fn process_tx(&self, vring: &VringRwLock, audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>) -> Result<bool> {
         let requests: Vec<SndDescriptorChain> = vring
             .get_mut()
             .get_queue_mut()
@@ -419,10 +442,14 @@ impl VhostUserSoundThread {
             .read_obj::<VirtioSoundPcmXfer>(desc_request.addr())
             .map_err(|_| Error::DescriptorReadFailed)?;
 
-            let _stream_id = hdr_request.stream_id.to_native();
+            let stream_id = hdr_request.stream_id.to_native();
 
             // TODO: to invoke audio_backend.write(stream_id, all_bufs, len)
 
+            if audio_backend.read().unwrap().write(stream_id, &all_bufs)
+            .is_err(){
+             return Err(Error::HandleEventNotEpollIn.into());
+            }
             // 5.14.6.8.1.1
             // The device MUST NOT complete the I/O request until the buffer is
             // totally consumed.
