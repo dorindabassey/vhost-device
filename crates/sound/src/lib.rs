@@ -62,6 +62,8 @@ pub enum Error {
     EventFdCreate(IoError),
     #[error("Request missing data buffer")]
     SoundReqMissingData,
+    #[error("Stream with id {0} not found")]
+    StreamWithIdNotFound(u32),
     #[error("Audio backend not supported")]
     AudioBackendNotSupported,
     #[error("Invalid virtio_snd_hdr size, expected: {0}, found: {1}")]
@@ -76,6 +78,8 @@ pub enum Error {
     UnexpectedDescriptorSize(usize, u32),
     #[error("Protocol or device error: {0}")]
     Stream(stream::Error),
+    #[error("Channel number not supported")]
+    ChannelNotSupported,
 }
 
 impl From<Error> for IoError {

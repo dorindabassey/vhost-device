@@ -399,6 +399,7 @@ impl VhostUserSoundThread {
         }
 
         let mut stream_ids = BTreeSet::default();
+        std::thread::sleep(std::time::Duration::from_millis(20));
 
         for desc_chain in requests {
             let mut state = TxState::Ready;

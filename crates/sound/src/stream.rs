@@ -8,6 +8,7 @@ use vm_memory::{Le32, Le64};
 
 use crate::{virtio_sound::*, IOMessage, SUPPORTED_FORMATS, SUPPORTED_RATES};
 
+pub const NR_STREAMS: usize = 1;
 /// Stream errors.
 #[derive(Debug, ThisError)]
 pub enum Error {
