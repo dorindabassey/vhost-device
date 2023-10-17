@@ -290,12 +290,24 @@ impl AudioBackend for PwBackend {
 
         let mut param = [Pod::from_bytes(&values).unwrap()];
 
+        let spa_dir: spa::Direction = stream_params[stream_id as usize].direction.into();
+
+        let media_category = match spa_dir {
+            spa::Direction::Input => "Capture",
+            spa::Direction::Output => "Playback",
+            _ => panic!("Invalid direction value"),
+        };
+        let stream_name = match spa_dir {
+            spa::Direction::Input => "audio-input",
+            spa::Direction::Output => "audio-output",
+            _ => panic!("Invalid direction value"),
+        };
         let props = properties! {
             *pw::keys::MEDIA_TYPE => "Audio",
-            *pw::keys::MEDIA_CATEGORY => "Playback",
+            *pw::keys::MEDIA_CATEGORY => media_category,
         };
 
-        let stream = pw::stream::Stream::new(&self.core, "audio-output", props)
+        let stream = pw::stream::Stream::new(&self.core, stream_name, props)
             .expect("could not create new stream");
 
         let streams = self.stream_params.clone();
@@ -322,60 +334,114 @@ impl AudioBackend for PwBackend {
             .process(move |stream, _data| match stream.dequeue_buffer() {
                 None => debug!("No buffer recieved"),
                 Some(mut buf) => {
-                    let datas = buf.datas_mut();
-                    let frame_size = info.channels * size_of::<i16>() as u32;
-                    let data = &mut datas[0];
-                    let n_bytes = if let Some(slice) = data.data() {
-                        let mut n_bytes = slice.len();
-                        let mut streams = streams.write().unwrap();
-                        let streams = streams
-                            .get_mut(stream_id as usize)
-                            .expect("Stream does not exist");
-                        let Some(buffer) = streams.buffers.front_mut() else {
-                            return;
-                        };
-                        if let Err(err) = buffer.read() {
-                            log::error!(
-                                "Could not read TX buffer, dropping it immediately: {}",
-                                err
-                            );
-                            streams.buffers.pop_front();
-                            return;
+                    match spa_dir {
+                        spa::Direction::Input => {
+                            let datas = buf.datas_mut();
+                            dbg!("data len is ", datas.len());
+                            let data = &mut datas[0];
+                            let mut n_samples = data.chunk().size() as usize;
+                            if let Some(slice) = data.data() {
+                                let mut streams = streams.write().unwrap();
+                                let streams = streams
+                                    .get_mut(stream_id as usize)
+                                    .expect("Stream does not exist");
+                                let mut start = 0;
+                                while n_samples > 0 {
+                                    let Some(buffer) = streams.buffers.front_mut() else {
+                                        return;
+                                    };
+                                    buffer.prepare_write();
+
+                                    let avail = (buffer.bytes.len() - buffer.pos) as i32;
+                                    println!("avail is {}", avail);
+                                    let mut n_bytes = n_samples;
+
+                                    if avail < n_samples as i32 {
+                                        n_bytes = avail.try_into().unwrap();
+                                    }
+                                    dbg!("new nbytes is", n_bytes);
+                                    let p = &slice[start..start + n_bytes];
+                                    dbg!("p for play is", p.len());
+
+                                    let slice = &mut buffer.bytes
+                                        [buffer.pos..buffer.pos + n_bytes];
+                                    dbg!("slice for play is", slice.len());
+                                    slice.copy_from_slice(p);
+
+                                    buffer.pos += n_bytes;
+                                    n_samples -= n_bytes;
+                                    start += n_bytes;
+
+                                    if buffer.pos >= buffer.bytes.len() {
+                                        streams.buffers.pop_front();
+                                    }
+                                }
+
+                                slice.len()
+                            } else {
+                                0
+                            };
                         }
+                        spa::Direction::Output => {
+                            let datas = buf.datas_mut();
+                            dbg!("data len is ", datas.len());
+                            let frame_size = info.channels * size_of::<i16>() as u32;
+                            let data = &mut datas[0];
+                            let n_bytes = if let Some(slice) = data.data() {
+                                let mut n_bytes = slice.len();
+                                let mut streams = streams.write().unwrap();
+                                let streams = streams
+                                    .get_mut(stream_id as usize)
+                                    .expect("Stream does not exist");
+                                let Some(buffer) = streams.buffers.front_mut() else {
+                                    return;
+                                };
+                                if let Err(err) = buffer.read() {
+                                    log::error!(
+                                        "Could not read TX buffer, dropping it immediately: {}",
+                                        err
+                                    );
+                                    streams.buffers.pop_front();
+                                    return;
+                                }
 
-                        let mut start = buffer.pos;
+                                let avail = (buffer.bytes.len() - buffer.pos) as i32;
+                                dbg!("avail is", avail);
+                                dbg!("nbytes is", n_bytes);
 
-                        let avail = (buffer.bytes.len() - start) as i32;
+                                if avail < n_bytes as i32 {
+                                    n_bytes = avail.try_into().unwrap();
+                                }
+                                dbg!("new nbytes is", n_bytes);
+                                let p = &mut slice[0..n_bytes];
+                                dbg!("p for play is", p.len());
+                                if avail <= 0 {
+                                    // pad with silence
+                                    unsafe {
+                                        ptr::write_bytes(p.as_mut_ptr(), 0, n_bytes);
+                                    }
+                                } else {
+                                    let slice = &buffer.bytes[buffer.pos..buffer.pos + n_bytes];
+                                    dbg!("slice for play is", slice.len());
+                                    p.copy_from_slice(slice);
 
-                        if avail < n_bytes as i32 {
-                            n_bytes = avail.try_into().unwrap();
+                                    buffer.pos += n_bytes;
+
+                                    if buffer.pos >= buffer.bytes.len() {
+                                        streams.buffers.pop_front();
+                                    }
+                                }
+                                n_bytes
+                            } else {
+                                0
+                            };
+                            let chunk = data.chunk_mut();
+                            *chunk.offset_mut() = 0;
+                            *chunk.stride_mut() = frame_size as _;
+                            *chunk.size_mut() = n_bytes as _;
                         }
-                        let p = &mut slice[buffer.pos..start + n_bytes];
-                        if avail <= 0 {
-                            // pad with silence
-                            unsafe {
-                                ptr::write_bytes(p.as_mut_ptr(), 0, n_bytes);
-                            }
-                        } else {
-                            let slice = &buffer.bytes[buffer.pos..start + n_bytes];
-                            p.copy_from_slice(slice);
-
-                            start += n_bytes;
-
-                            buffer.pos = start;
-
-                            if start >= buffer.bytes.len() {
-                                streams.buffers.pop_front();
-                            }
-                        }
-                        n_bytes
-                    } else {
-                        0
+                        _ => panic!("Invalid direction value"),
                     };
-                    let chunk = data.chunk_mut();
-                    *chunk.offset_mut() = 0;
-                    *chunk.stride_mut() = frame_size as _;
-                    *chunk.size_mut() = n_bytes as _;
                 }
             })
             .register()
