@@ -50,6 +50,12 @@ pub struct RutabagaResource {
     pub size: u64,
     pub mapping: Option<MemoryMapping>,
 }
+// SAFETY: Safe as the structure can be sent to another thread.
+unsafe impl Send for RutabagaResource {}
+
+// SAFETY: Safe as the structure can be shared with another thread as the state
+// is protected with a lock.
+unsafe impl Sync for RutabagaResource {}
 
 /// A RutabagaComponent is a building block of the Virtual Graphics Interface (VGI).  Each component
 /// on it's own is sufficient to virtualize graphics on many Google products.  These components wrap
@@ -58,7 +64,7 @@ pub struct RutabagaResource {
 ///
 /// Most methods return a `RutabagaResult` that indicate the success, failure, or requested data for
 /// the given command.
-pub trait RutabagaComponent {
+pub trait RutabagaComponent: Send + Sync {
     /// Implementations should return the version and size of the given capset_id.  (0, 0) is
     /// returned by default.
     fn get_capset_info(&self, _capset_id: u32) -> (u32, u32) {
@@ -211,7 +217,7 @@ pub trait RutabagaComponent {
     }
 }
 
-pub trait RutabagaContext {
+pub trait RutabagaContext: Send + Sync {
     /// Implementations must return a RutabagaResource given the `resource_create_blob` parameters.
     fn context_create_blob(
         &mut self,

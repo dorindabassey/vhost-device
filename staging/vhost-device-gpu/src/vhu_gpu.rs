@@ -7,7 +7,7 @@
 use log::{debug, info, warn, error};
 use std::{
     convert,
-    io::{self, Result as IoResult, Read, Write},
+    io::{self, Read, Result as IoResult, Write}, sync::{Arc, RwLock},
 };
 
 use thiserror::Error as ThisError;
@@ -87,12 +87,13 @@ pub(crate) struct VhostUserGpuBackend {
     pub exit_event: EventFd,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     shm_region: Option<VirtioShmRegion>,
+    virtio_gpu: VirtioGpu,
 }
 
 type GpuDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<()>>>;
 
 impl VhostUserGpuBackend {
-    pub fn new(gpu_config: GpuConfig) -> Result<Self> {
+    pub fn new(gpu_config: GpuConfig, virtio_gpu: VirtioGpu,) -> Result<Self> {
         log::trace!("VhostUserGpuBackend::new(config = {:?})", &gpu_config);
         Ok(VhostUserGpuBackend {
             virtio_cfg: VirtioGpuConfig {
@@ -105,6 +106,7 @@ impl VhostUserGpuBackend {
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
             mem: None,
             shm_region: None,
+            virtio_gpu,
         })
     }
 
@@ -115,14 +117,13 @@ impl VhostUserGpuBackend {
 
     fn process_gpu_command(
         &mut self,
-        virtio_gpu: &mut VirtioGpu,
         mem: &GuestMemoryMmap,
         hdr: virtio_gpu_ctrl_hdr,
         cmd: GpuCommand,
         reader: &GuestMemoryMmap,
         desc_addr: GuestAddress,
     ) -> VirtioGpuResult {
-        virtio_gpu.force_ctx_0();
+        self.virtio_gpu.force_ctx_0();
         match cmd {
             GpuCommand::GetDisplayInfo(_) => {
                 panic!("virtio_gpu: GpuCommand::GetDisplayInfo unimplemented");
@@ -143,17 +144,17 @@ impl VhostUserGpuBackend {
                     flags: 0,
                 };
 
-                virtio_gpu.resource_create_3d(resource_id, resource_create_3d)
+                self.virtio_gpu.resource_create_3d(resource_id, resource_create_3d)
             }
-            GpuCommand::ResourceUnref(info) => virtio_gpu.unref_resource(info.resource_id),
+            GpuCommand::ResourceUnref(info) => self.virtio_gpu.unref_resource(info.resource_id),
             GpuCommand::SetScanout(_info) => {
                 panic!("virtio_gpu: GpuCommand::SetScanout unimplemented");
             }
-            GpuCommand::ResourceFlush(info) => virtio_gpu.flush_resource(info.resource_id),
+            GpuCommand::ResourceFlush(info) => self.virtio_gpu.flush_resource(info.resource_id),
             GpuCommand::TransferToHost2d(info) => {
                 let resource_id = info.resource_id;
                 let transfer = Transfer3D::new_2d(info.r.x, info.r.y, info.r.width, info.r.height);
-                virtio_gpu.transfer_write(0, resource_id, transfer)
+                self.virtio_gpu.transfer_write(0, resource_id, transfer)
             }
             GpuCommand::ResourceAttachBacking(info) => {todo!()}
             // GpuCommand::ResourceAttachBacking(info) => {
@@ -177,7 +178,7 @@ impl VhostUserGpuBackend {
             //         Err(GpuResponse::ErrUnspec)
             //     }
             // }
-            GpuCommand::ResourceDetachBacking(info) => virtio_gpu.detach_backing(info.resource_id),
+            GpuCommand::ResourceDetachBacking(info) => self.virtio_gpu.detach_backing(info.resource_id),
             GpuCommand::UpdateCursor(_info) => {
                 panic!("virtio_gpu: GpuCommand:UpdateCursor unimplemented");
             }
@@ -186,23 +187,23 @@ impl VhostUserGpuBackend {
             }
             GpuCommand::ResourceAssignUuid(info) => {
                 let resource_id = info.resource_id;
-                virtio_gpu.resource_assign_uuid(resource_id)
+                self.virtio_gpu.resource_assign_uuid(resource_id)
             }
-            GpuCommand::GetCapsetInfo(info) => virtio_gpu.get_capset_info(info.capset_index),
+            GpuCommand::GetCapsetInfo(info) => self.virtio_gpu.get_capset_info(info.capset_index),
             GpuCommand::GetCapset(info) => {
-                virtio_gpu.get_capset(info.capset_id, info.capset_version)
+                self.virtio_gpu.get_capset(info.capset_id, info.capset_version)
             }
 
             GpuCommand::CtxCreate(info) => {
                 let context_name: Option<String> = String::from_utf8(info.debug_name.to_vec()).ok();
-                virtio_gpu.create_context(hdr.ctx_id, info.context_init, context_name.as_deref())
+                self.virtio_gpu.create_context(hdr.ctx_id, info.context_init, context_name.as_deref())
             }
-            GpuCommand::CtxDestroy(_info) => virtio_gpu.destroy_context(hdr.ctx_id),
+            GpuCommand::CtxDestroy(_info) => self.virtio_gpu.destroy_context(hdr.ctx_id),
             GpuCommand::CtxAttachResource(info) => {
-                virtio_gpu.context_attach_resource(hdr.ctx_id, info.resource_id)
+                self.virtio_gpu.context_attach_resource(hdr.ctx_id, info.resource_id)
             }
             GpuCommand::CtxDetachResource(info) => {
-                virtio_gpu.context_detach_resource(hdr.ctx_id, info.resource_id)
+                self.virtio_gpu.context_detach_resource(hdr.ctx_id, info.resource_id)
             }
             GpuCommand::ResourceCreate3d(info) => {
                 let resource_id = info.resource_id;
@@ -219,7 +220,7 @@ impl VhostUserGpuBackend {
                     flags: info.flags,
                 };
 
-                virtio_gpu.resource_create_3d(resource_id, resource_create_3d)
+                self.virtio_gpu.resource_create_3d(resource_id, resource_create_3d)
             }
             GpuCommand::TransferToHost3d(info) => {
                 let ctx_id = hdr.ctx_id;
@@ -238,7 +239,7 @@ impl VhostUserGpuBackend {
                     offset: info.offset,
                 };
 
-                virtio_gpu.transfer_write(ctx_id, resource_id, transfer)
+                self.virtio_gpu.transfer_write(ctx_id, resource_id, transfer)
             }
             GpuCommand::TransferFromHost3d(info) => {
                 let ctx_id = hdr.ctx_id;
@@ -257,7 +258,7 @@ impl VhostUserGpuBackend {
                     offset: info.offset,
                 };
 
-                virtio_gpu.transfer_read(ctx_id, resource_id, transfer, None)
+                self.virtio_gpu.transfer_read(ctx_id, resource_id, transfer, None)
             }
             GpuCommand::CmdSubmit3d(info) => {todo!()}
             GpuCommand::ResourceCreateBlob(info) => {todo!()}
@@ -331,12 +332,12 @@ impl VhostUserGpuBackend {
                 let resource_id = info.resource_id;
                 let offset = info.offset;
                 let sregion = self.shm_region.as_ref().unwrap();
-                virtio_gpu.resource_map_blob(resource_id, &sregion, offset)
+                self.virtio_gpu.resource_map_blob(resource_id, &sregion, offset)
             }
             GpuCommand::ResourceUnmapBlob(info) => {
                 let resource_id = info.resource_id;
                 let sregion = self.shm_region.as_ref().unwrap();
-                virtio_gpu.resource_unmap_blob(resource_id, &sregion)
+                self.virtio_gpu.resource_unmap_blob(resource_id, &sregion)
             }
         }
     }
@@ -344,7 +345,6 @@ impl VhostUserGpuBackend {
     fn process_requests(
         &mut self,
         requests: Vec<GpuDescriptorChain>,
-        virtio_gpu: &mut VirtioGpu,
         vring: &VringRwLock,
     ) -> Result<()> {
         if requests.is_empty() {
@@ -418,7 +418,7 @@ impl VhostUserGpuBackend {
 
             match GpuCommand::decode(&reader, desc_addr) {
                 Ok((hdr, cmd)) => {
-                    resp = self.process_gpu_command(virtio_gpu, &mem, hdr, cmd, &reader, desc_addr);
+                    resp = self.process_gpu_command(&mem, hdr, cmd, &reader, desc_addr);
                     ctrl_hdr = Some(hdr);
                     gpu_cmd = Some(cmd);
                 }
@@ -452,7 +452,7 @@ impl VhostUserGpuBackend {
                         ctx_id,
                         ring_idx,
                     };
-                    gpu_response = match virtio_gpu.create_fence(fence) {
+                    gpu_response = match self.virtio_gpu.create_fence(fence) {
                         Ok(_) => gpu_response,
                         Err(fence_resp) => {
                             warn!("create_fence {} -> {:?}", fence_id, fence_resp);
@@ -477,7 +477,7 @@ impl VhostUserGpuBackend {
                     _ => VirtioGpuRing::ContextSpecific { ctx_id, ring_idx },
                 };
 
-                add_to_queue = virtio_gpu.process_fence(ring, fence_id, desc_chain.head_index(), len);
+                add_to_queue = self.virtio_gpu.process_fence(ring, fence_id, desc_chain.head_index(), len);
             }
             if add_to_queue {
                 used_len += desc_hdr.len();
@@ -518,11 +518,7 @@ impl VhostUserGpuBackend {
 
         let mem: GuestMemoryMmap = (*atomic_mem.memory().into_inner()).clone();
 
-        let mut virtio_gpu = VirtioGpu::new(
-            vring,
-        );
-
-        if self.process_requests(requests, &mut virtio_gpu, vring).is_ok() {
+        if self.process_requests(requests, vring).is_ok() {
             // Send notification once all the requests are processed
             debug!("Sending processed request notification");
             vring
@@ -650,7 +646,7 @@ mod tests {
     use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue};
-    use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
+    use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
     use super::*;
 
@@ -681,7 +677,7 @@ mod tests {
         GuestMemoryAtomic<GuestMemoryMmap>,
         VringRwLock,
     ) {
-        let backend = VhostUserGpuBackend::new(GpuConfig::new(SOCKET_PATH.into())).unwrap();
+        let backend = VhostUserGpuBackend::new(GpuConfig::new(SOCKET_PATH.into()), VirtioGpu::new()).unwrap();
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );

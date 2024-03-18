@@ -101,7 +101,7 @@ pub struct VirtioGpu {
 
 impl VirtioGpu {
     fn create_fence_handler(
-        queue_ctl: VringRwLock,
+        //queue_ctl: VringRwLock,
         fence_state: Arc<Mutex<FenceState>>,
         // interrupt_status: Arc<AtomicUsize>,
         // interrupt_evt: EventFd,
@@ -137,12 +137,14 @@ impl VirtioGpu {
                         completed_desc.desc_index
                     );
 
-                    queue_ctl.add_used(completed_desc.desc_index, completed_desc.len).unwrap();
+                    // temporarily comment, we need to understand it's role play in initializing rutabaga
 
-                    queue_ctl
-                        .signal_used_queue()
-                        .map_err(|_| Error::NotificationFailed).unwrap();
-                    debug!("Notification sent");
+                    //queue_ctl.add_used(completed_desc.desc_index, completed_desc.len).unwrap();
+
+                    // queue_ctl
+                    //     .signal_used_queue()
+                    //     .map_err(|_| Error::NotificationFailed).unwrap();
+                    // debug!("Notification sent");
                     // interrupt_status.fetch_or(VIRTIO_MMIO_INT_VRING as usize, Ordering::SeqCst);
                     // if let Some(intc) = &intc {
                     //     intc.lock().unwrap().set_irq(irq_line.unwrap());
@@ -161,7 +163,7 @@ impl VirtioGpu {
     }
 
     pub fn new(
-        queue_ctl: &VringRwLock,
+        //queue_ctl: &VringRwLock,
         // interrupt_status: Arc<AtomicUsize>,
         // interrupt_evt: EventFd,
         // intc: Option<Arc<Mutex<Gic>>>,
@@ -195,7 +197,7 @@ impl VirtioGpu {
 
         let fence_state = Arc::new(Mutex::new(Default::default()));
         let fence = Self::create_fence_handler(
-            queue_ctl.clone(),
+            //queue_ctl.clone(),
             fence_state.clone(),
             // interrupt_status,
             // interrupt_evt,

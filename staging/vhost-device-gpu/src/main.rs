@@ -20,8 +20,8 @@ use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 use crate::vhu_gpu::VhostUserGpuBackend;
-//use vhu_gpu::VhostUserGpuBackend;
 use vhost_device_gpu::GpuConfig;
+use crate::virt_gpu::VirtioGpu;
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -56,13 +56,15 @@ impl TryFrom<GpuArgs> for GpuConfig {
 
 fn start_backend(config: GpuConfig) -> Result<()> {
 
-    let handle: JoinHandle<Result<()>> = spawn(move || loop {
+    let handle: JoinHandle<Result<()>> = spawn(move || {
+        let virtio_gpu = VirtioGpu::new();
+
         info!("Starting backend");
         // There isn't much value in complicating code here to return an error from the threads,
         // and so the code uses unwrap() instead. The panic on a thread won't cause trouble to the
         // main() function and should be safe for the daemon.
         let backend = Arc::new(RwLock::new(
-            VhostUserGpuBackend::new(config.clone()).map_err(Error::CouldNotCreateBackend)?,
+            VhostUserGpuBackend::new(config.clone(), virtio_gpu).map_err(Error::CouldNotCreateBackend)?,
         ));
 
         let socket = config.get_socket_path();
@@ -75,6 +77,7 @@ fn start_backend(config: GpuConfig) -> Result<()> {
         .map_err(Error::CouldNotCreateDaemon)?;
 
         daemon.serve(socket).map_err(Error::ServeFailed)?;
+        Ok(())
     });
 
     handle.join().map_err(std::panic::resume_unwind).unwrap()
