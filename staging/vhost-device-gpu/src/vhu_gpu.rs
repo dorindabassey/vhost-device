@@ -171,14 +171,14 @@ impl VhostUserGpuBackend {
             GpuCommand::ResourceUnref(info) => virtio_gpu.unref_resource(info.resource_id),
             GpuCommand::SetScanout(info) => {
                 debug!("SetScanout: {info:?}");
-                let gpu_scanout: VhostUserGpuScanout = VhostUserGpuScanout {
+                let mut gpu_scanout: VhostUserGpuScanout = VhostUserGpuScanout {
                     scanout_id: info.scanout_id,
                     width: info.r.width,
                     height: info.r.height,
                 };
                 virtio_gpu.set_scanout(
                     self.gpu_backend.as_mut().unwrap(),
-                    gpu_scanout,
+                    &mut gpu_scanout,
                     info.resource_id,
                     None,
                 )
