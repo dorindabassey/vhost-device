@@ -55,6 +55,121 @@ fn sglist_to_rutabaga_iovecs(
     Ok(rutabaga_iovecs)
 }
 
+pub trait VirtioGpuBackend
+where
+    Self: Sized,
+{
+    fn update_scanout_resource(
+        &mut self,
+        gpu_backend: &mut GpuBackend,
+        gpu_scanout: VhostUserGpuScanout,
+        resource_id: u32,
+        scanout_data: Option<VirtioScanoutBlobData>,
+    ) -> VirtioGpuResult;
+    fn resource_unmap_blob(
+        &mut self,
+        resource_id: u32,
+        shm_region: &VirtioShmRegion,
+    ) -> VirtioGpuResult;
+    fn resource_map_blob(
+        &mut self,
+        resource_id: u32,
+        shm_region: &VirtioShmRegion,
+        offset: u64,
+    ) -> VirtioGpuResult;
+    fn resource_create_blob(
+        &mut self,
+        ctx_id: u32,
+        resource_id: u32,
+        resource_create_blob: ResourceCreateBlob,
+        vecs: Vec<(GuestAddress, usize)>,
+        mem: &GuestMemoryMmap,
+    ) -> VirtioGpuResult;
+    fn process_fence(
+        &mut self,
+        ring: VirtioGpuRing,
+        fence_id: u64,
+        desc_index: u16,
+        len: u32,
+    ) -> bool;
+    fn create_fence(&mut self, rutabaga_fence: RutabagaFence) -> VirtioGpuResult;
+    fn submit_command(
+        &mut self,
+        ctx_id: u32,
+        commands: &mut [u8],
+        fence_ids: &[u64],
+    ) -> VirtioGpuResult;
+    fn context_detach_resource(&mut self, ctx_id: u32, resource_id: u32) -> VirtioGpuResult;
+    fn context_attach_resource(&mut self, ctx_id: u32, resource_id: u32) -> VirtioGpuResult;
+    fn destroy_context(&mut self, ctx_id: u32) -> VirtioGpuResult;
+    fn result_from_query(&mut self, resource_id: u32) -> GpuResponse;
+    fn force_ctx_0(&self);
+    fn display_info(&self, display_info: VirtioGpuRespDisplayInfo) -> Vec<(u32, u32, bool)>;
+    fn get_edid(
+        &self,
+        gpu_backend: &mut GpuBackend,
+        edid_req: VhostUserGpuEdidRequest,
+    ) -> VirtioGpuResult;
+    fn set_scanout(
+        &mut self,
+        gpu_backend: &mut GpuBackend,
+        gpu_scanout: VhostUserGpuScanout,
+        resource_id: u32,
+        scanout_data: Option<VirtioScanoutBlobData>,
+    ) -> VirtioGpuResult;
+    fn resource_create_3d(
+        &mut self,
+        resource_id: u32,
+        resource_create_3d: ResourceCreate3D,
+    ) -> VirtioGpuResult;
+    fn unref_resource(&mut self, resource_id: u32) -> VirtioGpuResult;
+    fn flush_resource(&mut self, resource_id: u32) -> VirtioGpuResult;
+    fn transfer_write(
+        &mut self,
+        ctx_id: u32,
+        resource_id: u32,
+        transfer: Transfer3D,
+    ) -> VirtioGpuResult;
+    fn transfer_read(
+        &mut self,
+        _ctx_id: u32,
+        _resource_id: u32,
+        _transfer: Transfer3D,
+        _buf: Option<VolatileSlice>,
+    ) -> VirtioGpuResult;
+    fn attach_backing(
+        &mut self,
+        resource_id: u32,
+        mem: &GuestMemoryMmap,
+        vecs: Vec<(GuestAddress, usize)>,
+    ) -> VirtioGpuResult;
+    fn detach_backing(&mut self, resource_id: u32) -> VirtioGpuResult;
+    fn update_cursor(
+        &mut self,
+        _resource_id: u32,
+        gpu_backend: &mut GpuBackend,
+        cursor_pos: VhostUserGpuCursorPos,
+        hot_x: u32,
+        hot_y: u32,
+        _mem: &GuestMemoryMmap,
+    ) -> VirtioGpuResult;
+    fn move_cursor(
+        &mut self,
+        resource_id: u32,
+        gpu_backend: &mut GpuBackend,
+        cursor: VhostUserGpuCursorPos,
+    ) -> VirtioGpuResult;
+    fn resource_assign_uuid(&self, resource_id: u32) -> VirtioGpuResult;
+    fn get_capset_info(&self, index: u32) -> VirtioGpuResult;
+    fn get_capset(&self, capset_id: u32, version: u32) -> VirtioGpuResult;
+    fn create_context(
+        &mut self,
+        ctx_id: u32,
+        context_init: u32,
+        context_name: Option<&str>,
+    ) -> VirtioGpuResult;
+}
+
 #[derive(Clone)]
 pub struct VirtioShmRegion {
     pub host_addr: u64,
@@ -223,7 +338,9 @@ impl VirtioGpu {
             fence_state,
         }
     }
+}
 
+impl VirtioGpuBackend for VirtioGpu {
     // Non-public function -- no doc comment needed!
     fn result_from_query(&mut self, resource_id: u32) -> GpuResponse {
         match self.rutabaga.query(resource_id) {
@@ -245,12 +362,12 @@ impl VirtioGpu {
         }
     }
 
-    pub fn force_ctx_0(&self) {
+    fn force_ctx_0(&self) {
         self.rutabaga.force_ctx_0()
     }
 
     /// Gets the list of supported display resolutions as a slice of `(width, height, enabled)` tuples.
-    pub fn display_info(&self, display_info: VirtioGpuRespDisplayInfo) -> Vec<(u32, u32, bool)> {
+    fn display_info(&self, display_info: VirtioGpuRespDisplayInfo) -> Vec<(u32, u32, bool)> {
         display_info
             .pmodes
             .iter()
@@ -260,7 +377,7 @@ impl VirtioGpu {
 
     /// Gets the EDID for the specified scanout ID. If that scanout is not enabled, it would return
     /// the EDID of a default display.
-    pub fn get_edid(
+    fn get_edid(
         &self,
         gpu_backend: &mut GpuBackend,
         edid_req: VhostUserGpuEdidRequest,
@@ -277,7 +394,7 @@ impl VirtioGpu {
     }
 
     /// Sets the given resource id as the source of scanout to the display.
-    pub fn set_scanout(
+    fn set_scanout(
         &mut self,
         gpu_backend: &mut GpuBackend,
         gpu_scanout: VhostUserGpuScanout,
@@ -288,7 +405,7 @@ impl VirtioGpu {
     }
 
     /// Creates a 3D resource with the given properties and resource_id.
-    pub fn resource_create_3d(
+    fn resource_create_3d(
         &mut self,
         resource_id: u32,
         resource_create_3d: ResourceCreate3D,
@@ -309,7 +426,7 @@ impl VirtioGpu {
     }
 
     /// Releases guest kernel reference on the resource.
-    pub fn unref_resource(&mut self, resource_id: u32) -> VirtioGpuResult {
+    fn unref_resource(&mut self, resource_id: u32) -> VirtioGpuResult {
         let resource = self
             .resources
             .remove(&resource_id)
@@ -324,7 +441,7 @@ impl VirtioGpu {
     }
 
     /// If the resource is the scanout resource, flush it to the display.
-    pub fn flush_resource(&mut self, resource_id: u32) -> VirtioGpuResult {
+    fn flush_resource(&mut self, resource_id: u32) -> VirtioGpuResult {
         if resource_id == 0 {
             return Ok(OkNoData);
         }
@@ -340,7 +457,7 @@ impl VirtioGpu {
     }
 
     /// Copies data to host resource from the attached iovecs. Can also be used to flush caches.
-    pub fn transfer_write(
+    fn transfer_write(
         &mut self,
         ctx_id: u32,
         resource_id: u32,
@@ -356,7 +473,7 @@ impl VirtioGpu {
     ///    2) To the host resource's attached iovecs
     ///
     /// Can also be used to invalidate caches.
-    pub fn transfer_read(
+    fn transfer_read(
         &mut self,
         _ctx_id: u32,
         _resource_id: u32,
@@ -369,7 +486,7 @@ impl VirtioGpu {
     /// Attaches backing memory to the given resource, represented by a `Vec` of `(address, size)`
     /// tuples in the guest's physical address space. Converts to RutabagaIovec from the memory
     /// mapping.
-    pub fn attach_backing(
+    fn attach_backing(
         &mut self,
         resource_id: u32,
         mem: &GuestMemoryMmap,
@@ -381,14 +498,14 @@ impl VirtioGpu {
     }
 
     /// Detaches any previously attached iovecs from the resource.
-    pub fn detach_backing(&mut self, resource_id: u32) -> VirtioGpuResult {
+    fn detach_backing(&mut self, resource_id: u32) -> VirtioGpuResult {
         self.rutabaga.detach_backing(resource_id)?;
         Ok(OkNoData)
     }
 
     /// Updates the cursor's memory to the given resource_id, and sets its position to the given
     /// coordinates.
-    pub fn update_cursor(
+    fn update_cursor(
         &mut self,
         _resource_id: u32,
         gpu_backend: &mut GpuBackend,
@@ -418,7 +535,7 @@ impl VirtioGpu {
     }
 
     /// Moves the cursor's position to the given coordinates.
-    pub fn move_cursor(
+    fn move_cursor(
         &mut self,
         resource_id: u32,
         gpu_backend: &mut GpuBackend,
@@ -440,7 +557,7 @@ impl VirtioGpu {
     }
 
     /// Returns a uuid for the resource.
-    pub fn resource_assign_uuid(&self, resource_id: u32) -> VirtioGpuResult {
+    fn resource_assign_uuid(&self, resource_id: u32) -> VirtioGpuResult {
         if !self.resources.contains_key(&resource_id) {
             return Err(ErrInvalidResourceId);
         }
@@ -456,7 +573,7 @@ impl VirtioGpu {
     }
 
     /// Gets rutabaga's capset information associated with `index`.
-    pub fn get_capset_info(&self, index: u32) -> VirtioGpuResult {
+    fn get_capset_info(&self, index: u32) -> VirtioGpuResult {
         let (capset_id, version, size) = self.rutabaga.get_capset_info(index)?;
         Ok(OkCapsetInfo {
             capset_id,
@@ -466,13 +583,13 @@ impl VirtioGpu {
     }
 
     /// Gets a capset from rutabaga.
-    pub fn get_capset(&self, capset_id: u32, version: u32) -> VirtioGpuResult {
+    fn get_capset(&self, capset_id: u32, version: u32) -> VirtioGpuResult {
         let capset = self.rutabaga.get_capset(capset_id, version)?;
         Ok(OkCapset(capset))
     }
 
     /// Creates a rutabaga context.
-    pub fn create_context(
+    fn create_context(
         &mut self,
         ctx_id: u32,
         context_init: u32,
@@ -484,25 +601,25 @@ impl VirtioGpu {
     }
 
     /// Destroys a rutabaga context.
-    pub fn destroy_context(&mut self, ctx_id: u32) -> VirtioGpuResult {
+    fn destroy_context(&mut self, ctx_id: u32) -> VirtioGpuResult {
         self.rutabaga.destroy_context(ctx_id)?;
         Ok(OkNoData)
     }
 
     /// Attaches a resource to a rutabaga context.
-    pub fn context_attach_resource(&mut self, ctx_id: u32, resource_id: u32) -> VirtioGpuResult {
+    fn context_attach_resource(&mut self, ctx_id: u32, resource_id: u32) -> VirtioGpuResult {
         self.rutabaga.context_attach_resource(ctx_id, resource_id)?;
         Ok(OkNoData)
     }
 
     /// Detaches a resource from a rutabaga context.
-    pub fn context_detach_resource(&mut self, ctx_id: u32, resource_id: u32) -> VirtioGpuResult {
+    fn context_detach_resource(&mut self, ctx_id: u32, resource_id: u32) -> VirtioGpuResult {
         self.rutabaga.context_detach_resource(ctx_id, resource_id)?;
         Ok(OkNoData)
     }
 
     /// Submits a command buffer to a rutabaga context.
-    pub fn submit_command(
+    fn submit_command(
         &mut self,
         ctx_id: u32,
         commands: &mut [u8],
@@ -514,12 +631,12 @@ impl VirtioGpu {
 
     /// Creates a fence with the RutabagaFence that can be used to determine when the previous
     /// command completed.
-    pub fn create_fence(&mut self, rutabaga_fence: RutabagaFence) -> VirtioGpuResult {
+    fn create_fence(&mut self, rutabaga_fence: RutabagaFence) -> VirtioGpuResult {
         self.rutabaga.create_fence(rutabaga_fence)?;
         Ok(OkNoData)
     }
 
-    pub fn process_fence(
+    fn process_fence(
         &mut self,
         ring: VirtioGpuRing,
         fence_id: u64,
@@ -544,7 +661,7 @@ impl VirtioGpu {
     }
 
     /// Creates a blob resource using rutabaga.
-    pub fn resource_create_blob(
+    fn resource_create_blob(
         &mut self,
         ctx_id: u32,
         resource_id: u32,
@@ -582,7 +699,7 @@ impl VirtioGpu {
     /// rutabaga as ExternalMapping.
     /// When sandboxing is enabled, external_blob is set and opaque fds must be mapped in the
     /// hypervisor process by Vulkano using metadata provided by Rutabaga::vulkan_info().
-    pub fn resource_map_blob(
+    fn resource_map_blob(
         &mut self,
         resource_id: u32,
         shm_region: &VirtioShmRegion,
@@ -640,7 +757,7 @@ impl VirtioGpu {
     }
 
     /// Uses the hypervisor to unmap the blob resource.
-    pub fn resource_unmap_blob(
+    fn resource_unmap_blob(
         &mut self,
         resource_id: u32,
         shm_region: &VirtioShmRegion,
