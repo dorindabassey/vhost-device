@@ -170,7 +170,7 @@ where
     ) -> VirtioGpuResult;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct VirtioShmRegion {
     pub host_addr: u64,
     pub guest_addr: u64,
@@ -196,11 +196,12 @@ pub struct FenceState {
     completed_fences: BTreeMap<VirtioGpuRing, u64>,
 }
 
-struct VirtioGpuResource {
-    size: u64,
-    shmem_offset: Option<u64>,
-    rutabaga_external_mapping: bool,
-    scanout_data: Option<VirtioScanoutBlobData>,
+#[derive(Default)]
+pub struct VirtioGpuResource {
+    pub size: u64,
+    pub shmem_offset: Option<u64>,
+    pub rutabaga_external_mapping: bool,
+    pub scanout_data: Option<VirtioScanoutBlobData>,
 }
 
 impl VirtioGpuResource {
@@ -217,9 +218,9 @@ impl VirtioGpuResource {
 }
 
 pub struct VirtioGpu {
-    rutabaga: Rutabaga,
-    resources: BTreeMap<u32, VirtioGpuResource>,
-    fence_state: Arc<Mutex<FenceState>>,
+    pub(crate) rutabaga: Rutabaga,
+    pub(crate) resources: BTreeMap<u32, VirtioGpuResource>,
+    pub(crate) fence_state: Arc<Mutex<FenceState>>,
 }
 
 impl VirtioGpu {
@@ -827,5 +828,70 @@ impl VirtioGpuBackend for VirtioGpu {
         debug!("resource id: {:?}", resource_id);
 
         Ok(OkNoData)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::{VirtioGpu, VirtioGpuBackend, VirtioGpuResource, VirtioGpuRing, VirtioShmRegion};
+    use rutabaga_gfx::{
+        ResourceCreateBlob, RutabagaBuilder, RutabagaComponentType, RutabagaHandler,
+    };
+    use vhost_user_backend::{VringRwLock, VringT};
+    use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
+
+    fn new_2d() -> VirtioGpu {
+        let rutabaga = RutabagaBuilder::new(RutabagaComponentType::Rutabaga2D, 0)
+            .build(RutabagaHandler::new(|_| {}), None)
+            .unwrap();
+        VirtioGpu {
+            rutabaga,
+            resources: Default::default(),
+            fence_state: Arc::new(Mutex::new(Default::default())),
+        }
+    }
+
+    #[test]
+    fn test_gpu_backend_success() {
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+        let vring = VringRwLock::new(mem.clone(), 0x1000).unwrap();
+        vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
+        vring.set_queue_ready(true);
+
+        let rutabaga1 = new_2d();
+        rutabaga1.get_capset(0, 0).unwrap();
+        //redo
+        rutabaga1.get_capset_info(0).unwrap_err();
+
+        let mut rutabaga1 = new_2d();
+        let resource_create_blob = ResourceCreateBlob::default();
+        let vecs = vec![(GuestAddress(0), 10)];
+        let mem = &GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)])
+            .expect("Failed to create guest memory");
+        rutabaga1
+            .resource_create_blob(1, 1, resource_create_blob, vecs, mem)
+            .unwrap_err();
+
+        let shm_region = VirtioShmRegion::default();
+        let resource = VirtioGpuResource::default();
+        rutabaga1.resources.insert(1, resource);
+        rutabaga1.resource_map_blob(1, &shm_region, 0).unwrap_err();
+        rutabaga1.resource_unmap_blob(1, &shm_region).unwrap_err();
+        rutabaga1.context_attach_resource(1, 0).unwrap_err();
+        rutabaga1.destroy_context(1).unwrap_err();
+        rutabaga1.context_detach_resource(1, 0).unwrap_err();
+
+        rutabaga1.resource_assign_uuid(1).unwrap();
+        rutabaga1.create_context(1, 0, None).unwrap_err();
+        let mut cmd_buf = vec![0; 10];
+        let fence_ids: Vec<u64> = Vec::with_capacity(0);
+        rutabaga1
+            .submit_command(0, &mut cmd_buf[..], &fence_ids)
+            .unwrap_err();
+        rutabaga1.process_fence(VirtioGpuRing::Global, 0, 0, 0);
     }
 }
