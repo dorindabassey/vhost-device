@@ -453,7 +453,7 @@ impl VirtioGpu for RutabagaVirtioGpu {
     fn set_scanout(
         &mut self,
         gpu_backend: &mut GpuBackend,
-        gpu_scanout: VhostUserGpuScanout,
+        gpu_scanout: &mut VhostUserGpuScanout,
         resource_id: u32,
         scanout_data: Option<VirtioScanoutBlobData>,
     ) -> VirtioGpuResult {
@@ -814,18 +814,22 @@ impl VirtioGpu for RutabagaVirtioGpu {
     fn update_scanout_resource(
         &mut self,
         gpu_backend: &mut GpuBackend,
-        gpu_scanout: VhostUserGpuScanout,
+        gpu_scanout: &mut VhostUserGpuScanout,
         resource_id: u32,
         scanout_data: Option<VirtioScanoutBlobData>,
     ) -> VirtioGpuResult {
-        gpu_backend.set_scanout(&gpu_scanout).map_err(|e| {
+        gpu_backend.set_scanout(gpu_scanout).map_err(|e| {
             error!("Failed to set scanout from frontend: {}", e);
             ErrUnspec
         })?;
 
         // Virtio spec: "The driver can use resource_id = 0 to disable a scanout."
         if resource_id == 0 {
-            error!("NOT IMPLEMENTED: disable scanout");
+            //To disable a scanout, the dimensions width/height are set to 0.
+            if gpu_scanout.height != 0 && gpu_scanout.width != 0 {
+                gpu_scanout.height = 0;
+                gpu_scanout.width = 0;
+            }
             return Ok(OkNoData);
         }
 
