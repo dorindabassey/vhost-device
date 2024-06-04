@@ -1,3 +1,8 @@
+// Copyright 2024 Red Hat Inc
+// Copyright 2019 The ChromiumOS Authors
+//
+// SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
+
 use log::{debug, error, trace};
 use std::{
     collections::BTreeMap,

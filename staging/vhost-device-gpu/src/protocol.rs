@@ -1,6 +1,7 @@
+// Copyright 2024 Red Hat Inc
 // Copyright 2019 The ChromiumOS Authors
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
+//
+// SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 #![allow(non_camel_case_types)]
 
