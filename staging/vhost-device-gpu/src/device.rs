@@ -316,7 +316,6 @@ impl VhostUserGpuBackend {
     fn process_queue_chain(
         &mut self,
         virtio_gpu: &mut RutabagaVirtioGpu,
-        mem: &GuestMemoryMmap,
         vring: &VringRwLock,
         head_index: u16,
         reader: &mut Reader,
@@ -324,12 +323,13 @@ impl VhostUserGpuBackend {
         signal_used_queue: &mut bool,
     ) -> Result<()> {
         let mut response = ErrUnspec;
+        let mem = self.mem.as_ref().unwrap().memory().into_inner();
 
         let ctrl_hdr = match GpuCommand::decode(reader) {
             Ok((ctrl_hdr, gpu_cmd)) => {
                 // TODO: consider having a method that return &'static str for logging purpose
                 let cmd_name = format!("{:?}", gpu_cmd);
-                let response_result = self.process_gpu_command(virtio_gpu, mem, ctrl_hdr, gpu_cmd);
+                let response_result = self.process_gpu_command(virtio_gpu, &mem, ctrl_hdr, gpu_cmd);
                 // Unwrap the response from inside Result and log information
                 response = match response_result {
                     Ok(response) => {
@@ -432,7 +432,6 @@ impl VhostUserGpuBackend {
 
             self.process_queue_chain(
                 virtio_gpu,
-                &mem,
                 vring,
                 head_index,
                 &mut reader,
@@ -836,7 +835,6 @@ mod tests {
             backend
                 .process_queue_chain(
                     &mut virtio_gpu,
-                    &mem,
                     &vring,
                     desc_chain.head_index(),
                     &mut reader,
