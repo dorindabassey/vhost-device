@@ -79,9 +79,6 @@ pub const VIRTIO_GPU_RESP_OK_RESOURCE_PLANE_INFO: u32 = 0x11FF;
 /* Create a OS-specific handle from guest memory (not upstreamed). */
 pub const VIRTIO_GPU_BLOB_FLAG_CREATE_GUEST_HANDLE: u32 = 0x0008;
 
-pub const VIRTIO_GPU_SHM_ID_NONE: u8 = 0x0000;
-pub const VIRTIO_GPU_SHM_ID_HOST_VISIBLE: u8 = 0x0001;
-
 pub const VIRTIO_GPU_FLAG_FENCE: u32 = 1 << 0;
 pub const VIRTIO_GPU_FLAG_INFO_RING_IDX: u32 = 1 << 1;
 

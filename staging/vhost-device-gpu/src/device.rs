@@ -59,8 +59,6 @@ pub enum Error {
     HandleEventNotEpollIn,
     #[error("Failed to handle unknown event")]
     HandleEventUnknown,
-    #[error("Descriptor not found")]
-    DescriptorNotFound,
     #[error("Descriptor read failed")]
     DescriptorReadFailed,
     #[error("Descriptor write failed")]
@@ -69,18 +67,8 @@ pub enum Error {
     InvalidCommandType(u32),
     #[error("Failed to send used queue notification: {0}")]
     NotificationFailed(io::Error),
-    #[error("No memory configured")]
-    NoMemoryConfigured,
     #[error("Failed to create new EventFd")]
     EventFdFailed,
-    #[error("Received unexpected write only descriptor at index {0}")]
-    UnexpectedWriteOnlyDescriptor(usize),
-    #[error("Received unexpected readable descriptor at index {0}")]
-    UnexpectedReadableDescriptor(usize),
-    #[error("Invalid descriptor count {0}")]
-    UnexpectedDescriptorCount(usize),
-    #[error("Invalid descriptor size, expected: {0}, found: {1}")]
-    UnexpectedDescriptorSize(usize, u32),
     #[error("Failed to create an iterator over a descriptor chain: {0}")]
     CreateIteratorDescChain(virtio_queue::Error),
     #[error("Failed to create descriptor chain Reader: {0}")]

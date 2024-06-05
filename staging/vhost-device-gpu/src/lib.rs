@@ -8,13 +8,6 @@ pub mod virtio_gpu;
 
 use std::path::PathBuf;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum GPUstate {
-    GpuCmdStateNew,
-    GpuCmdStatePending,
-    GpuCmdStateFinished,
-}
-
 #[derive(Debug, Clone)]
 /// This structure is the public API through which an external program
 /// is allowed to configure the backend.
@@ -38,16 +31,7 @@ impl GpuConfig {
     pub fn get_socket_path(&self) -> PathBuf {
         PathBuf::from(&self.socket_path)
     }
-
-    // pub const fn get_audio_backend(&self) -> BackendType {
-    //     self.audio_backend
-    // }
 }
-
-/// Interrupt flags (re: interrupt status & acknowledge registers).
-/// See linux/virtio_mmio.h.
-pub const VIRTIO_MMIO_INT_VRING: u32 = 0x01;
-pub const VIRTIO_MMIO_INT_CONFIG: u32 = 0x02;
 
 #[derive(Debug)]
 pub enum GpuError {
@@ -55,24 +39,10 @@ pub enum GpuError {
     EventFd(std::io::Error),
     /// Failed to decode incoming command.
     DecodeCommand(std::io::Error),
-    /// Error creating Reader for Queue.
-    // QueueReader(DescriptorError),
-    /// Error creating Writer for Queue.
-    // QueueWriter(DescriptorError),
     /// Error writting to the Queue.
     WriteDescriptor(std::io::Error),
     /// Error reading Guest Memory,
     GuestMemory,
-}
-
-//type Result<T> = std::result::Result<T, GpuError>;
-
-#[cfg(target_os = "linux")]
-pub struct Gic {}
-
-#[cfg(target_os = "linux")]
-impl Gic {
-    pub fn set_irq(&mut self, _irq: u32) {}
 }
 
 #[cfg(test)]
@@ -87,13 +57,6 @@ mod tests {
         let socket_path = PathBuf::from("/tmp/socket");
         let gpu_config = GpuConfig::new(socket_path.clone());
         assert_eq!(gpu_config.get_socket_path(), socket_path);
-    }
-
-    #[test]
-    fn test_gic_set_irq() {
-        // Test setting IRQ in Gic struct
-        let mut gic = Gic {};
-        gic.set_irq(1);
     }
 
     #[test]
