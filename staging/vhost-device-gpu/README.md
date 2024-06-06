@@ -29,12 +29,13 @@ First start the daemon on the host machine:
 host# vhost-device-gpu --socket-path /tmp/gpu.socket
 ```
 
-With QEMU, there are two ways you can add a `virtio` device 
-that uses the backend's socket and any GPU display option 
-of your choice. The first method is using `vhost-user-gpu-pci`, 
-and the second method is using `vhost-user-vga`. 
-By default, QEMU display uses VGA, so to use any of the 
-virtio device options, ensure that the `vga` option is disabled.
+With QEMU, there are two device frontends you can use with this device.
+You can either use `vhost-user-gpu-pci` or `vhost-user-vga`, which also
+implements VGA, that allows you to see boot messeges before the guest 
+initalizes the gpu. You can also use different display outputs (for example 
+`gtk` or `dbus`).
+By default, QEMU also adds another VGA output, use `-vga none` to make 
+sure it is disabled.
 
 1) Using `vhost-user-gpu-pci` Start QEMU with the following flags:
 
