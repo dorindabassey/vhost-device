@@ -358,10 +358,7 @@ impl VhostUserGpuBackendInner {
                 let response_result = self.process_gpu_command(virtio_gpu, &mem, ctrl_hdr, gpu_cmd);
                 // Unwrap the response from inside Result and log information
                 response = match response_result {
-                    Ok(response) => {
-                        trace!("GpuCommand {cmd_name} success: {response:?}");
-                        response
-                    }
+                    Ok(response) => response,
                     Err(response) => {
                         debug!("GpuCommand {cmd_name} failed: {response:?}");
                         response
