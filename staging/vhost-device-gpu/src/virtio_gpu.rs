@@ -1,3 +1,8 @@
+// Copyright 2024 Red Hat Inc
+// Copyright 2019 The ChromiumOS Authors
+//
+// SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
+
 use log::{debug, error, trace};
 use std::{
     collections::BTreeMap,
@@ -911,7 +916,7 @@ impl VirtioGpu for RutabagaVirtioGpu {
                     RUTABAGA_MAP_ACCESS_READ => libc::PROT_READ,
                     RUTABAGA_MAP_ACCESS_WRITE => libc::PROT_WRITE,
                     RUTABAGA_MAP_ACCESS_RW => libc::PROT_READ | libc::PROT_WRITE,
-                    _ => panic!("unexpected prot mode for mapping"),
+                    _ => return Err(ErrUnspec),
                 };
 
                 if offset + resource.size > shm_region.size as u64 {
@@ -1015,12 +1020,11 @@ mod tests {
     #[test]
     fn test_gpu_backend_failure() {
         let mut virtio_gpu = new_2d();
-        //rework, based on capset info
+
         virtio_gpu.get_capset_info(0).unwrap_err();
         let resource_create_blob = ResourceCreateBlob::default();
         let vecs = vec![(GuestAddress(0), 10)];
-        let mem = &GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)])
-            .expect("Failed to create guest memory");
+        let mem = &GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
         virtio_gpu
             .resource_create_blob(1, 1, resource_create_blob, vecs, mem)
             .unwrap_err();

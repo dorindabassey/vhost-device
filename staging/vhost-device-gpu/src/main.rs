@@ -1,5 +1,6 @@
 // VIRTIO GPU Emulation via vhost-user
 //
+// Copyright 2024 Red Hat Inc
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
