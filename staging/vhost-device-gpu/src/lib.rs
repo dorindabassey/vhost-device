@@ -6,7 +6,16 @@ pub mod device;
 pub mod protocol;
 pub mod virtio_gpu;
 
+use serde::Deserialize;
 use std::path::PathBuf;
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+pub enum GpuMode {
+    #[serde(rename = "virglrenderer", alias = "3d", alias = "3D")]
+    ModeVirglRenderer,
+    #[serde(rename = "gfxstream")]
+    ModeGfxstream,
+}
 
 #[derive(Debug, Clone)]
 /// This structure is the public API through which an external program
@@ -14,19 +23,27 @@ use std::path::PathBuf;
 pub struct GpuConfig {
     /// vhost-user Unix domain socket
     socket_path: PathBuf,
+    renderer: GpuMode,
 }
 
 impl GpuConfig {
     /// Create a new instance of the GpuConfig struct, containing the
     /// parameters to be fed into the gpu-backend server.
-    pub const fn new(socket_path: PathBuf) -> Self {
-        Self { socket_path }
+    pub const fn new(socket_path: PathBuf, renderer: GpuMode) -> Self {
+        Self {
+            socket_path,
+            renderer,
+        }
     }
 
     /// Return the path of the unix domain socket which is listening to
     /// requests from the guest.
     pub fn get_socket_path(&self) -> PathBuf {
         PathBuf::from(&self.socket_path.clone())
+    }
+
+    pub fn get_renderer(&self) -> GpuMode {
+        self.renderer
     }
 }
 
