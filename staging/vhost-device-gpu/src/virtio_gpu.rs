@@ -299,18 +299,19 @@ impl AssociatedScanouts {
 
 #[derive(Default)]
 pub struct VirtioGpuResource {
-    pub size: u64,
+    width: u32,
+    height: u32,
     /// Stores information about which scanouts are associated with the given resource.
     /// Resource could be used for multiple scanouts (the displays are mirrored).
     scanouts: AssociatedScanouts,
 }
 
 impl VirtioGpuResource {
-    /// Creates a new VirtioGpuResource with the given metadata.  Width and height are used by the
-    /// display, while size is useful for hypervisor mapping.
-    pub fn new(_resource_id: u32, _width: u32, _height: u32, size: u64) -> VirtioGpuResource {
+    /// Creates a new VirtioGpuResource with 2D/3D metadata
+    pub fn new(width: u32, height: u32) -> VirtioGpuResource {
         VirtioGpuResource {
-            size,
+            width,
+            height,
             scanouts: Default::default(),
         }
     }
@@ -321,6 +322,7 @@ pub struct VirtioGpuScanout {
 }
 
 pub struct RutabagaVirtioGpu {
+    pub(crate) renderer: GpuMode,
     pub(crate) rutabaga: Rutabaga,
     pub(crate) resources: BTreeMap<u32, VirtioGpuResource>,
     pub(crate) fence_state: Arc<Mutex<FenceState>>,
@@ -404,6 +406,7 @@ impl RutabagaVirtioGpu {
             .expect("Rutabaga initialization failed!");
 
         Self {
+            renderer,
             rutabaga,
             resources: Default::default(),
             fence_state,
@@ -571,12 +574,7 @@ impl VirtioGpu for RutabagaVirtioGpu {
         self.rutabaga
             .resource_create_3d(resource_id, resource_create_3d)?;
 
-        let resource = VirtioGpuResource::new(
-            resource_id,
-            resource_create_3d.width,
-            resource_create_3d.height,
-            0,
-        );
+        let resource = VirtioGpuResource::new(resource_create_3d.width, resource_create_3d.height);
 
         debug_assert!(
             !self.resources.contains_key(&resource_id),
@@ -609,6 +607,20 @@ impl VirtioGpu for RutabagaVirtioGpu {
             .resources
             .get(&resource_id)
             .ok_or(ErrInvalidResourceId)?;
+
+        let rect = if self.renderer == GpuMode::ModeGfxstream {
+            // Gfxstream doesn't support transfer_read for portion of the resource. The width/height
+            // specified in stream_renderer_transfer_read_iov are ignored and the whole resource is
+            // copied.
+            Rectangle {
+                x: 0,
+                y: 0,
+                width: resource.width,
+                height: resource.height,
+            }
+        } else {
+            rect
+        };
 
         for scanout_id in resource.scanouts.iter_enabled() {
             let width = rect.width as usize;
@@ -905,7 +917,9 @@ impl VirtioGpu for RutabagaVirtioGpu {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use super::{RutabagaVirtioGpu, VirtioGpu, VirtioGpuResource, VirtioGpuRing, VirtioShmRegion};
+    use super::{
+        GpuMode, RutabagaVirtioGpu, VirtioGpu, VirtioGpuResource, VirtioGpuRing, VirtioShmRegion,
+    };
     use rutabaga_gfx::{
         ResourceCreateBlob, RutabagaBuilder, RutabagaComponentType, RutabagaHandler,
     };
@@ -916,6 +930,7 @@ mod tests {
             .build(RutabagaHandler::new(|_| {}), None)
             .unwrap();
         RutabagaVirtioGpu {
+            renderer: GpuMode::ModeVirglRenderer,
             rutabaga,
             resources: Default::default(),
             fence_state: Arc::new(Mutex::new(Default::default())),

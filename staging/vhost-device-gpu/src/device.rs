@@ -953,6 +953,7 @@ mod tests {
             .build(RutabagaHandler::new(|_| {}), None)
             .unwrap();
         RutabagaVirtioGpu {
+            renderer: GpuMode::ModeVirglRenderer,
             rutabaga,
             resources: BTreeMap::default(),
             fence_state: Arc::new(Mutex::new(Default::default())),
