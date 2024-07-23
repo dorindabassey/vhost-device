@@ -7,7 +7,7 @@ use log::{debug, error, trace};
 use std::{
     collections::BTreeMap,
     io::IoSliceMut,
-    os::fd::{AsRawFd, FromRawFd},
+    os::fd::FromRawFd,
     result::Result,
     sync::{Arc, Mutex},
 };
@@ -15,9 +15,7 @@ use std::{
 use libc::c_void;
 use rutabaga_gfx::{
     ResourceCreate3D, ResourceCreateBlob, Rutabaga, RutabagaBuilder, RutabagaComponentType,
-    RutabagaFence, RutabagaFenceHandler, RutabagaIntoRawDescriptor, RutabagaIovec, RutabagaResult,
-    Transfer3D, RUTABAGA_MAP_ACCESS_MASK, RUTABAGA_MAP_ACCESS_READ, RUTABAGA_MAP_ACCESS_RW,
-    RUTABAGA_MAP_ACCESS_WRITE, RUTABAGA_MAP_CACHE_MASK, RUTABAGA_MEM_HANDLE_TYPE_OPAQUE_FD,
+    RutabagaFence, RutabagaFenceHandler, RutabagaIntoRawDescriptor, RutabagaIovec, Transfer3D,
 };
 use vhost::vhost_user::{
     gpu_message::{
@@ -27,14 +25,12 @@ use vhost::vhost_user::{
     GpuBackend,
 };
 use vhost_user_backend::{VringRwLock, VringT};
-use virtio_bindings::virtio_gpu::VIRTIO_GPU_BLOB_MEM_HOST3D;
 use vm_memory::{GuestAddress, GuestMemory, GuestMemoryMmap, VolatileSlice};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::protocol::{
     virtio_gpu_rect, GpuResponse, GpuResponse::*, GpuResponsePlaneInfo, VirtioGpuResult,
-    VIRTIO_GPU_BLOB_FLAG_CREATE_GUEST_HANDLE, VIRTIO_GPU_FLAG_INFO_RING_IDX,
-    VIRTIO_GPU_MAX_SCANOUTS,
+    VIRTIO_GPU_FLAG_INFO_RING_IDX, VIRTIO_GPU_MAX_SCANOUTS,
 };
 use crate::{device::Error, GpuMode};
 
@@ -300,24 +296,37 @@ impl AssociatedScanouts {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 pub struct VirtioGpuResource {
-    pub size: u64,
-    pub shmem_offset: Option<u64>,
-    pub rutabaga_external_mapping: bool,
+    id: u32,
+    width: u32,
+    height: u32,
     /// Stores information about which scanouts are associated with the given resource.
     /// Resource could be used for multiple scanouts (the displays are mirrored).
     scanouts: AssociatedScanouts,
 }
 
 impl VirtioGpuResource {
-    /// Creates a new VirtioGpuResource with the given metadata.  Width and height are used by the
-    /// display, while size is useful for hypervisor mapping.
-    pub fn new(_resource_id: u32, _width: u32, _height: u32, size: u64) -> VirtioGpuResource {
+    fn calculate_size(&self) -> Result<usize, &str> {
+        let width = self.width as usize;
+        let height = self.height as usize;
+        let size = width
+            .checked_mul(height)
+            .ok_or("Multiplication of width and height overflowed")?
+            .checked_mul(READ_RESOURCE_BYTES_PER_PIXEL)
+            .ok_or("Multiplication of result and bytes_per_pixel overflowed")?;
+
+        Ok(size)
+    }
+}
+
+impl VirtioGpuResource {
+    /// Creates a new VirtioGpuResource with 2D/3D metadata
+    pub fn new(resource_id: u32, width: u32, height: u32) -> VirtioGpuResource {
         VirtioGpuResource {
-            size,
-            shmem_offset: None,
-            rutabaga_external_mapping: false,
+            id: resource_id,
+            width,
+            height,
             scanouts: Default::default(),
         }
     }
@@ -438,39 +447,29 @@ impl RutabagaVirtioGpu {
 
     fn read_2d_resource(
         &mut self,
-        resource_id: u32,
-        rect: &Rectangle,
+        resource: VirtioGpuResource,
         output: &mut [u8],
-    ) -> RutabagaResult<()> {
-        let width = rect.width as usize;
-        let height = rect.height as usize;
-        let bytes_per_pixel = READ_RESOURCE_BYTES_PER_PIXEL;
-        let (result_len, overflowed) = width.overflowing_mul(height);
-        assert!(!overflowed, "Multiplication of width and height overflowed");
-
-        let (result_len, overflowed) = result_len.overflowing_mul(bytes_per_pixel);
-        assert!(
-            !overflowed,
-            "Multiplication of result and bytes_per_pixel overflowed"
-        );
-        assert!(output.len() >= result_len);
+    ) -> Result<(), String> {
+        let minimal_buffer_size = resource.calculate_size()?;
+        assert!(output.len() >= minimal_buffer_size);
 
         let transfer = Transfer3D {
-            x: rect.x,
-            y: rect.y,
+            x: 0,
+            y: 0,
             z: 0,
-            w: rect.width,
-            h: rect.height,
+            w: resource.width,
+            h: resource.height,
             d: 1,
             level: 0,
-            stride: rect.width * READ_RESOURCE_BYTES_PER_PIXEL as u32,
+            stride: resource.width * READ_RESOURCE_BYTES_PER_PIXEL as u32,
             layer_stride: 0,
             offset: 0,
         };
 
         // ctx_id 0 seems to be special, crosvm uses it for this purpose too
         self.rutabaga
-            .transfer_read(0, resource_id, transfer, Some(IoSliceMut::new(output)))?;
+            .transfer_read(0, resource.id, transfer, Some(IoSliceMut::new(output)))
+            .map_err(|e| format!("{e}"))?;
 
         Ok(())
     }
@@ -582,7 +581,6 @@ impl VirtioGpu for RutabagaVirtioGpu {
             resource_id,
             resource_create_3d.width,
             resource_create_3d.height,
-            0,
         );
 
         debug_assert!(
@@ -597,15 +595,6 @@ impl VirtioGpu for RutabagaVirtioGpu {
     }
 
     fn unref_resource(&mut self, resource_id: u32) -> VirtioGpuResult {
-        let resource = self
-            .resources
-            .remove(&resource_id)
-            .ok_or(ErrInvalidResourceId)?;
-
-        if resource.rutabaga_external_mapping {
-            self.rutabaga.unmap(resource_id)?;
-        }
-
         self.rutabaga.unref_resource(resource_id)?;
         Ok(OkNoData)
     }
@@ -615,33 +604,34 @@ impl VirtioGpu for RutabagaVirtioGpu {
         &mut self,
         resource_id: u32,
         gpu_backend: &mut GpuBackend,
-        rect: Rectangle,
+        _rect: Rectangle,
     ) -> VirtioGpuResult {
         if resource_id == 0 {
             return Ok(OkNoData);
         }
 
-        let resource = self
+        let resource = *self
             .resources
             .get(&resource_id)
             .ok_or(ErrInvalidResourceId)?;
 
         for scanout_id in resource.scanouts.iter_enabled() {
-            let width = rect.width as usize;
-            let height = rect.height as usize;
-            let bytes_per_pixel = READ_RESOURCE_BYTES_PER_PIXEL;
-            let (result_len, overflowed) = width.overflowing_mul(height);
-            assert!(!overflowed, "Multiplication of width and height overflowed");
+            let resource_size = resource.calculate_size().map_err(|e| {
+                error!(
+                    "Resource {id} size calculation failed: {e}",
+                    id = resource.id
+                );
+                ErrUnspec
+            })?;
 
-            let (result_len, overflowed) = result_len.overflowing_mul(bytes_per_pixel);
-            assert!(
-                !overflowed,
-                "Multiplication of result and bytes_per_pixel overflowed"
-            );
+            let mut data = vec![0; resource_size];
 
-            let mut data = vec![0; result_len];
-
-            if let Err(e) = self.read_2d_resource(resource_id, &rect, &mut data) {
+            // Gfxstream doesn't support transfer_read for portion of the resource. So we always
+            // read the whole resource, even if the guest specified to flush only a portion of it.
+            //
+            // The function stream_renderer_transfer_read_iov seems to ignore the stride and
+            // transfer_box parameters and expects the provided buffer to fit the whole resource.
+            if let Err(e) = self.read_2d_resource(resource, &mut data) {
                 log::error!("Failed to read resource {resource_id} for scanout {scanout_id}: {e}");
                 continue;
             }
@@ -650,10 +640,10 @@ impl VirtioGpu for RutabagaVirtioGpu {
                 .update_scanout(
                     &VhostUserGpuUpdate {
                         scanout_id,
-                        x: rect.x,
-                        y: rect.y,
-                        width: rect.width,
-                        height: rect.height,
+                        x: 0,
+                        y: 0,
+                        width: resource.width,
+                        height: resource.height,
                     },
                     &data,
                 )
@@ -661,13 +651,6 @@ impl VirtioGpu for RutabagaVirtioGpu {
                     error!("Failed to update_scanout: {e:?}");
                     ErrUnspec
                 })?
-        }
-
-        #[cfg(windows)]
-        match self.rutabaga.resource_flush(resource_id) {
-            Ok(_) => return Ok(OkNoData),
-            Err(RutabagaError::Unsupported) => {}
-            Err(e) => return Err(ErrRutabaga(e)),
         }
 
         Ok(OkNoData)
@@ -728,15 +711,24 @@ impl VirtioGpu for RutabagaVirtioGpu {
         hot_x: u32,
         hot_y: u32,
     ) -> VirtioGpuResult {
-        let mut data = Box::new([0; 4 * 64 * 64]);
-        let cursor_rect = Rectangle {
-            x: 0,
-            y: 0,
-            width: 64,
-            height: 64,
-        };
+        const CURSOR_WIDTH: u32 = 64;
+        const CURSOR_HEIGHT: u32 = 64;
 
-        self.read_2d_resource(resource_id, &cursor_rect, &mut data[..])
+        let mut data = Box::new(
+            [0; READ_RESOURCE_BYTES_PER_PIXEL * CURSOR_WIDTH as usize * CURSOR_HEIGHT as usize],
+        );
+
+        let cursor_resource = self
+            .resources
+            .get(&resource_id)
+            .ok_or(ErrInvalidResourceId)?;
+
+        if cursor_resource.width != CURSOR_WIDTH || cursor_resource.height != CURSOR_HEIGHT {
+            error!("Cursor resource has invalid dimensions");
+            return Err(ErrInvalidParameter);
+        }
+
+        self.read_2d_resource(*cursor_resource, &mut data[..])
             .map_err(|e| {
                 error!("Failed to read resource of cursor: {e}");
                 ErrUnspec
@@ -875,130 +867,33 @@ impl VirtioGpu for RutabagaVirtioGpu {
 
     fn resource_create_blob(
         &mut self,
-        ctx_id: u32,
-        resource_id: u32,
-        resource_create_blob: ResourceCreateBlob,
-        vecs: Vec<(GuestAddress, usize)>,
-        mem: &GuestMemoryMmap,
+        _ctx_id: u32,
+        _resource_id: u32,
+        _resource_create_blob: ResourceCreateBlob,
+        _vecs: Vec<(GuestAddress, usize)>,
+        _mem: &GuestMemoryMmap,
     ) -> VirtioGpuResult {
-        let mut rutabaga_iovecs = None;
-
-        if resource_create_blob.blob_flags & VIRTIO_GPU_BLOB_FLAG_CREATE_GUEST_HANDLE != 0 {
-            panic!("GUEST_HANDLE unimplemented");
-        } else if resource_create_blob.blob_mem != VIRTIO_GPU_BLOB_MEM_HOST3D {
-            rutabaga_iovecs =
-                Some(sglist_to_rutabaga_iovecs(&vecs[..], mem).map_err(|_| ErrUnspec)?);
-        }
-
-        self.rutabaga.resource_create_blob(
-            ctx_id,
-            resource_id,
-            resource_create_blob,
-            rutabaga_iovecs,
-            None,
-        )?;
-
-        let resource = VirtioGpuResource::new(resource_id, 0, 0, resource_create_blob.size);
-
-        debug_assert!(
-            !self.resources.contains_key(&resource_id),
-            "Resource ID {} already exists in the resources map.",
-            resource_id
-        );
-
-        // Rely on rutabaga to check for duplicate resource ids.
-        self.resources.insert(resource_id, resource);
-        Ok(self.result_from_query(resource_id))
+        error!("Not implemented: resource_create_blob");
+        Err(ErrUnspec)
     }
 
     fn resource_map_blob(
         &mut self,
-        resource_id: u32,
-        shm_region: &VirtioShmRegion,
-        offset: u64,
+        _resource_id: u32,
+        _shm_region: &VirtioShmRegion,
+        _offset: u64,
     ) -> VirtioGpuResult {
-        let resource = self
-            .resources
-            .get_mut(&resource_id)
-            .ok_or(ErrInvalidResourceId)?;
-
-        let map_info = self.rutabaga.map_info(resource_id).map_err(|_| ErrUnspec)?;
-
-        if let Ok(export) = self.rutabaga.export_blob(resource_id) {
-            if export.handle_type != RUTABAGA_MEM_HANDLE_TYPE_OPAQUE_FD {
-                let prot = match map_info & RUTABAGA_MAP_ACCESS_MASK {
-                    x if x == RUTABAGA_MAP_ACCESS_READ => libc::PROT_READ,
-                    x if x == RUTABAGA_MAP_ACCESS_WRITE => libc::PROT_WRITE,
-                    x if x == RUTABAGA_MAP_ACCESS_RW => libc::PROT_READ | libc::PROT_WRITE,
-                    _ => return Err(ErrUnspec),
-                };
-
-                if offset + resource.size > shm_region.size as u64 {
-                    error!("mapping DOES NOT FIT");
-                }
-                let addr = shm_region.host_addr + offset;
-                debug!(
-                    "mapping: host_addr={:x}, addr={:x}, size={}",
-                    shm_region.host_addr, addr, resource.size
-                );
-                let ret = unsafe {
-                    libc::mmap(
-                        addr as *mut libc::c_void,
-                        resource.size as usize,
-                        prot,
-                        libc::MAP_SHARED | libc::MAP_FIXED,
-                        export.os_handle.as_raw_fd(),
-                        0 as libc::off_t,
-                    )
-                };
-                if ret == libc::MAP_FAILED {
-                    return Err(ErrUnspec);
-                }
-            } else {
-                return Err(ErrUnspec);
-            }
-        } else {
-            return Err(ErrUnspec);
-        }
-
-        resource.shmem_offset = Some(offset);
-        // Access flags not a part of the virtio-gpu spec.
-        Ok(OkMapInfo {
-            map_info: map_info & RUTABAGA_MAP_CACHE_MASK,
-        })
+        error!("Not implemented: resource_map_blob");
+        Err(ErrUnspec)
     }
 
     fn resource_unmap_blob(
         &mut self,
-        resource_id: u32,
-        shm_region: &VirtioShmRegion,
+        _resource_id: u32,
+        _shm_region: &VirtioShmRegion,
     ) -> VirtioGpuResult {
-        let resource = self
-            .resources
-            .get_mut(&resource_id)
-            .ok_or(ErrInvalidResourceId)?;
-
-        let shmem_offset = resource.shmem_offset.ok_or(ErrUnspec)?;
-
-        let addr = shm_region.host_addr + shmem_offset;
-
-        let ret = unsafe {
-            libc::mmap(
-                addr as *mut libc::c_void,
-                resource.size as usize,
-                libc::PROT_NONE,
-                libc::MAP_ANONYMOUS | libc::MAP_PRIVATE | libc::MAP_FIXED,
-                -1,
-                0_i64,
-            )
-        };
-        if ret == libc::MAP_FAILED {
-            panic!("UNMAP failed");
-        }
-
-        resource.shmem_offset = None;
-
-        Ok(OkNoData)
+        error!("Not implemented: resource_unmap_blob");
+        Err(ErrUnspec)
     }
 
     fn get_event_poll_fd(&self) -> Option<EventFd> {
