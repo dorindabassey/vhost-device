@@ -28,8 +28,8 @@ log = "0.4"
 [target.'cfg(not(target_env = "musl"))'.dependencies]
 rutabaga_gfx = { version = "0.1.4", features = ["virgl_renderer"] }
 thiserror = "2.0.3"
-vhost = { version = "0.13.0", features = ["vhost-user-backend"] }
-vhost-user-backend = "0.17"
+vhost = { git = "https://github.com/mtjhrc/vhost.git", package = "vhost", branch = "shmem", features = ["vhost-user-backend"] }
+vhost-user-backend = { git = "https://github.com/mtjhrc/vhost.git", package = "vhost-user-backend", branch = "shmem" }
 virtio-bindings = "0.2.2"
 virtio-queue = "0.14.0"
 vm-memory = "0.16.1"
