@@ -13,8 +13,8 @@ use std::{
 
 use log::{debug, error, info, trace, warn};
 use rutabaga_gfx::{
-    ResourceCreate3D, RutabagaFence, Transfer3D, RUTABAGA_PIPE_BIND_RENDER_TARGET,
-    RUTABAGA_PIPE_TEXTURE_2D,
+    ResourceCreate3D, ResourceCreateBlob, RutabagaFence, Transfer3D,
+    RUTABAGA_PIPE_BIND_RENDER_TARGET, RUTABAGA_PIPE_TEXTURE_2D,
 };
 use thiserror::Error as ThisError;
 use vhost::vhost_user::{
@@ -213,17 +213,29 @@ impl VhostUserGpuBackendInner {
                 fence_ids,
                 mut cmd_data,
             } => virtio_gpu.submit_command(hdr.ctx_id.into(), &mut cmd_data, &fence_ids),
-            GpuCommand::ResourceCreateBlob(_) => {
-                panic!("virtio_gpu: GpuCommand::ResourceCreateBlob unimplemented")
+            GpuCommand::ResourceCreateBlob(info, vecs) => {
+                let create_blob = ResourceCreateBlob {
+                    size: info.size.into(),
+                    blob_mem: info.blob_mem.into(),
+                    blob_id: info.blob_id.into(),
+                    blob_flags: info.blob_flags.into(),
+                };
+                virtio_gpu.resource_create_blob(
+                    hdr.ctx_id.into(),
+                    info.resource_id.into(),
+                    create_blob,
+                    vecs,
+                    mem,
+                )
             }
             GpuCommand::SetScanoutBlob(_) => {
                 panic!("virtio_gpu: GpuCommand::SetScanoutBlob unimplemented")
             }
-            GpuCommand::ResourceMapBlob(_) => {
-                panic!("virtio_gpu: GpuCommand::ResourceMapBlob unimplemented")
+            GpuCommand::ResourceMapBlob(info) => {
+                virtio_gpu.resource_map_blob(info.resource_id.into(), info.offset.into())
             }
-            GpuCommand::ResourceUnmapBlob(_) => {
-                panic!("virtio_gpu: GpuCommand::ResourceUnmapBlob unimplemented")
+            GpuCommand::ResourceUnmapBlob(info) => {
+                virtio_gpu.resource_unmap_blob(info.resource_id.into())
             }
         }
     }
