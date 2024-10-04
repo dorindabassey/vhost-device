@@ -753,9 +753,11 @@ impl VirtioGpu for RutabagaVirtioGpu {
     }
 
     fn resource_assign_uuid(&self, resource_id: u32) -> VirtioGpuResult {
-        if !self.resources.contains_key(&resource_id) {
-            return Err(ErrInvalidResourceId);
-        }
+        debug_assert!(
+            self.resources.contains_key(&resource_id),
+            "Resource ID {} doesn't exists in the resources map.",
+            resource_id
+        );
 
         // TODO(stevensd): use real uuids once the virtio wayland protocol is updated to
         // handle more than 32 bits. For now, the virtwl driver knows that the uuid is
