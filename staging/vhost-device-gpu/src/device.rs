@@ -8,7 +8,7 @@ use crate::{
     protocol::{
         virtio_gpu_box, virtio_gpu_ctrl_hdr, virtio_gpu_ctx_create, virtio_gpu_ctx_resource,
         virtio_gpu_cursor_pos, virtio_gpu_get_capset, virtio_gpu_get_capset_info,
-        virtio_gpu_get_edid, virtio_gpu_rect, virtio_gpu_resource_attach_backing,
+        virtio_gpu_get_edid, virtio_gpu_rect, virtio_gpu_resource_assign_uuid, virtio_gpu_resource_attach_backing,
         virtio_gpu_resource_create_2d, virtio_gpu_resource_create_3d,
         virtio_gpu_resource_detach_backing, virtio_gpu_resource_flush, virtio_gpu_resource_unref,
         virtio_gpu_set_scanout, virtio_gpu_transfer_host_3d, virtio_gpu_transfer_to_host_2d,
@@ -46,7 +46,7 @@ use virtio_bindings::{
     },
     virtio_gpu::{
         VIRTIO_GPU_F_CONTEXT_INIT, VIRTIO_GPU_F_EDID, VIRTIO_GPU_F_RESOURCE_BLOB,
-        VIRTIO_GPU_F_VIRGL,
+        VIRTIO_GPU_F_RESOURCE_UUID, VIRTIO_GPU_F_VIRGL,
     },
 };
 use virtio_queue::{QueueOwnedT, Reader, Writer};
@@ -248,9 +248,9 @@ impl VhostUserGpuBackendInner {
                 let cursor = VhostUserGpuCursorPos { scanout_id, x, y };
                 virtio_gpu.move_cursor(resource_id, cursor)
             }
-            GpuCommand::ResourceAssignUuid(_info) => {
-                panic!("virtio_gpu: GpuCommand::ResourceAssignUuid unimplemented");
-            }
+            GpuCommand::ResourceAssignUuid(virtio_gpu_resource_assign_uuid {
+                resource_id, ..
+            }) => virtio_gpu.resource_assign_uuid(resource_id),
             GpuCommand::GetCapsetInfo(virtio_gpu_get_capset_info { capset_index, .. }) => {
                 virtio_gpu.get_capset_info(capset_index)
             }
@@ -642,6 +642,7 @@ impl VhostUserBackend for VhostUserGpuBackend {
             | 1 << VIRTIO_RING_F_EVENT_IDX
             | 1 << VIRTIO_GPU_F_VIRGL
             | 1 << VIRTIO_GPU_F_EDID
+            | 1 << VIRTIO_GPU_F_RESOURCE_UUID
             | 1 << VIRTIO_GPU_F_RESOURCE_BLOB
             | 1 << VIRTIO_GPU_F_CONTEXT_INIT
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
@@ -654,6 +655,7 @@ impl VhostUserBackend for VhostUserGpuBackend {
             | VhostUserProtocolFeatures::BACKEND_REQ
             | VhostUserProtocolFeatures::BACKEND_SEND_FD
             | VhostUserProtocolFeatures::REPLY_ACK
+            | VhostUserProtocolFeatures::SHARED_OBJECT
     }
 
     fn set_event_idx(&self, enabled: bool) {

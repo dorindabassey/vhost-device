@@ -21,6 +21,7 @@ log = "0.4"
 [target.'cfg(not(target_env = "musl"))'.dependencies]
 rutabaga_gfx = { version = "0.1.4", features = ["gfxstream", "virgl_renderer"] }
 thiserror = "1.0"
+uuid = { version = "1.3", features = ["serde", "v4"] }
 vhost = { git = "https://github.com/rust-vmm/vhost.git", package = "vhost", branch = "main", features = ["vhost-user-backend"] }
 vhost-user-backend = { git = "https://github.com/rust-vmm/vhost.git", package = "vhost-user-backend", branch = "main",  features = ["gpu-socket"] }
 virtio-bindings = "0.2.2"

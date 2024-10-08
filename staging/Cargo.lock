@@ -1215,6 +1215,7 @@ checksum = "81dfa00651efa65069b0b6b651f4aaa31ba9e3c3ce0137aaad053604ee7e0314"
 dependencies = [
  "getrandom",
  "rand",
+ "serde",
  "uuid-macro-internal",
 ]
 
@@ -1321,6 +1322,7 @@ dependencies = [
  "rusty-fork",
  "rutabaga_gfx",
  "thiserror",
+ "uuid",
  "vhost 0.12.0 (git+https://github.com/rust-vmm/vhost.git?branch=main)",
  "vhost-user-backend 0.16.0 (git+https://github.com/rust-vmm/vhost.git?branch=main)",
  "virtio-bindings",

@@ -17,7 +17,10 @@ use rutabaga_gfx::{
     ResourceCreate3D, ResourceCreateBlob, Rutabaga, RutabagaBuilder, RutabagaComponentType,
     RutabagaFence, RutabagaFenceHandler, RutabagaIntoRawDescriptor, RutabagaIovec, Transfer3D,
 };
+use uuid::Uuid;
+use vhost::vhost_user::message::VhostUserSharedMsg;
 use vhost::vhost_user::{
+    VhostUserFrontendReqHandler,
     gpu_message::{
         VhostUserGpuCursorPos, VhostUserGpuCursorUpdate, VhostUserGpuEdidRequest,
         VhostUserGpuScanout, VhostUserGpuUpdate,
@@ -744,17 +747,25 @@ impl VirtioGpu for RutabagaVirtioGpu {
     }
 
     fn resource_assign_uuid(&self, resource_id: u32) -> VirtioGpuResult {
-        if !self.resources.contains_key(&resource_id) {
-            return Err(ErrInvalidResourceId);
-        }
+        debug_assert!(
+            self.resources.contains_key(&resource_id),
+            "Resource ID {} doesn't exists in the resources map.",
+            resource_id
+        );
 
-        // TODO(stevensd): use real uuids once the virtio wayland protocol is updated to
-        // handle more than 32 bits. For now, the virtwl driver knows that the uuid is
-        // actually just the resource id.
-        let mut uuid: [u8; 16] = [0; 16];
-        for (idx, byte) in resource_id.to_be_bytes().iter().enumerate() {
-            uuid[12 + idx] = *byte;
-        }
+        let shared_msg = VhostUserSharedMsg {
+            uuid: Uuid::new_v4(),
+        };
+            
+        self.backend.shared_object_add(&shared_msg).map_err(|e| {
+            error!(
+                "Failed to send vhost-user shared-object add request to the frontend: {}",
+                e
+            );
+            ErrUnspec
+        })?;
+        let uuid = shared_msg.uuid.into_bytes();
+
         Ok(OkResourceUuid { uuid })
     }
 
