@@ -18,7 +18,8 @@ use rutabaga_gfx::{
     RutabagaFence, RutabagaFenceHandler, RutabagaIntoRawDescriptor, RutabagaIovec, Transfer3D,
     RUTABAGA_MAP_ACCESS_MASK, RUTABAGA_MAP_CACHE_MASK, RUTABAGA_MEM_HANDLE_TYPE_OPAQUE_FD,
 };
-use vhost::vhost_user::message::{VhostUserMMap, VhostUserMMapFlags};
+use uuid::Uuid;
+use vhost::vhost_user::message::{VhostUserMMap, VhostUserMMapFlags, VhostUserSharedMsg};
 use vhost::vhost_user::{
     gpu_message::{
         VhostUserGpuCursorPos, VhostUserGpuCursorUpdate, VhostUserGpuEdidRequest,
@@ -765,17 +766,32 @@ impl VirtioGpu for RutabagaVirtioGpu {
     }
 
     fn resource_assign_uuid(&self, resource_id: u32) -> VirtioGpuResult {
-        if !self.resources.contains_key(&resource_id) {
-            return Err(ErrInvalidResourceId);
-        }
-
-        // TODO(stevensd): use real uuids once the virtio wayland protocol is updated to
-        // handle more than 32 bits. For now, the virtwl driver knows that the uuid is
-        // actually just the resource id.
+        debug_assert!(
+            self.resources.contains_key(&resource_id),
+            "Resource ID {} doesn't exists in the resources map.",
+            resource_id
+        );
+        // Create a UUID array and fill in the last 4 bytes with the resource ID.
         let mut uuid: [u8; 16] = [0; 16];
         for (idx, byte) in resource_id.to_be_bytes().iter().enumerate() {
             uuid[12 + idx] = *byte;
         }
+        // // Create the UUID from the array.
+        // let shared_uuid = Uuid::from_bytes(uuid);
+
+        // Create a VhostUserSharedMsg with the UUID.
+        // let shared_msg = VhostUserSharedMsg {
+        //     uuid: shared_uuid, // Convert [u8; 16] to the expected UUID type
+        // };
+        let shared_msg = VhostUserSharedMsg::default();
+        self.backend.shared_object_add(&shared_msg).map_err(|e| {
+            error!(
+                "Failed to send vhost-user shared-object add request to the frontend: {}",
+                e
+            );
+            ErrUnspec
+        })?;
+
         Ok(OkResourceUuid { uuid })
     }
 

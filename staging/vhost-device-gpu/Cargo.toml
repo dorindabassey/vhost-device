@@ -20,6 +20,7 @@ libc = "0.2"
 log = "0.4"
 rutabaga_gfx = { git = "https://github.com/dorindabassey/crosvm.git", package = "rutabaga_gfx",  branch = "minigbm_fix", features = ["gfxstream", "virgl_renderer"] }
 thiserror = "1.0"
+uuid = { version = "1.3", features = ["serde", "v4"] }
 vhost = { git = "https://github.com/mtjhrc/vhost.git", package = "vhost", branch = "shmem", features = ["vhost-user-backend", "gpu-socket"] }
 vhost-user-backend = { git = "https://github.com/mtjhrc/vhost.git", package = "vhost-user-backend", branch = "shmem",  features = ["gpu-socket"] }
 virtio-bindings = "0.2.2"

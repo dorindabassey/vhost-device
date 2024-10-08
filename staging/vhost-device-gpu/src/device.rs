@@ -46,7 +46,7 @@ use virtio_bindings::{
     },
     virtio_gpu::{
         VIRTIO_GPU_F_CONTEXT_INIT, VIRTIO_GPU_F_EDID, VIRTIO_GPU_F_RESOURCE_BLOB,
-        VIRTIO_GPU_F_VIRGL,
+        VIRTIO_GPU_F_RESOURCE_UUID, VIRTIO_GPU_F_VIRGL,
     },
 };
 use virtio_queue::{QueueOwnedT, Reader, Writer};
@@ -652,6 +652,7 @@ impl VhostUserBackend for VhostUserGpuBackend {
             | 1 << VIRTIO_RING_F_EVENT_IDX
             | 1 << VIRTIO_GPU_F_VIRGL
             | 1 << VIRTIO_GPU_F_EDID
+            | 1 << VIRTIO_GPU_F_RESOURCE_UUID
             | 1 << VIRTIO_GPU_F_RESOURCE_BLOB
             | 1 << VIRTIO_GPU_F_CONTEXT_INIT
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
@@ -664,6 +665,7 @@ impl VhostUserBackend for VhostUserGpuBackend {
             | VhostUserProtocolFeatures::BACKEND_REQ
             | VhostUserProtocolFeatures::BACKEND_SEND_FD
             | VhostUserProtocolFeatures::REPLY_ACK
+            | VhostUserProtocolFeatures::SHARED_OBJECT
     }
 
     fn set_event_idx(&self, enabled: bool) {
