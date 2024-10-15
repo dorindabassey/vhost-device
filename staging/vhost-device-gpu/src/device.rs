@@ -20,7 +20,7 @@ use thiserror::Error as ThisError;
 use vhost::vhost_user::{
     gpu_message::{VhostUserGpuCursorPos, VhostUserGpuEdidRequest},
     message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures},
-    GpuBackend,
+    Backend, GpuBackend,
 };
 use vhost_user_backend::{VhostUserBackend, VringEpollHandler, VringRwLock, VringT};
 use virtio_bindings::{
@@ -99,6 +99,7 @@ struct VhostUserGpuBackendInner {
     virtio_cfg: VirtioGpuConfig,
     event_idx_enabled: bool,
     gpu_backend: Option<GpuBackend>,
+    backend: Option<Backend>,
     pub exit_event: EventFd,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     gpu_config: GpuConfig,
@@ -129,6 +130,7 @@ impl VhostUserGpuBackend {
             },
             event_idx_enabled: false,
             gpu_backend: None,
+            backend: None,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
             mem: None,
             gpu_config,
@@ -573,6 +575,13 @@ impl VhostUserGpuBackendInner {
                         )
                     })?;
 
+                    let backend = self.backend.take().ok_or_else(|| {
+                        io::Error::new(
+                            ErrorKind::Other,
+                            "set_backend_req_fd() not called, Backend missing",
+                        )
+                    })?;
+
                     // We currently pass the CONTROL_QUEUE vring to RutabagaVirtioGpu, because we
                     // only expect to process fences for that queue.
                     let control_vring = &vrings[CONTROL_QUEUE as usize];
@@ -580,8 +589,12 @@ impl VhostUserGpuBackendInner {
                     // VirtioGpu::new can be called once per process (otherwise it panics),
                     // so if somehow another thread accidentally wants to create another gpu here,
                     // it will panic anyway
-                    let virtio_gpu =
-                        RutabagaVirtioGpu::new(control_vring, &self.gpu_config, gpu_backend);
+                    let virtio_gpu = RutabagaVirtioGpu::new(
+                        control_vring,
+                        &self.gpu_config,
+                        backend,
+                        gpu_backend,
+                    );
                     event_poll_fd = virtio_gpu.get_event_poll_fd();
 
                     maybe_virtio_gpu.insert(virtio_gpu)
@@ -638,7 +651,11 @@ impl VhostUserBackend for VhostUserGpuBackend {
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
         debug!("Protocol features called");
-        VhostUserProtocolFeatures::CONFIG | VhostUserProtocolFeatures::MQ
+        VhostUserProtocolFeatures::CONFIG
+            | VhostUserProtocolFeatures::MQ
+            | VhostUserProtocolFeatures::BACKEND_REQ
+            | VhostUserProtocolFeatures::BACKEND_SEND_FD
+            | VhostUserProtocolFeatures::REPLY_ACK
     }
 
     fn set_event_idx(&self, enabled: bool) {
@@ -655,6 +672,10 @@ impl VhostUserBackend for VhostUserGpuBackend {
     fn set_gpu_socket(&self, backend: GpuBackend) -> IoResult<()> {
         self.inner.lock().unwrap().gpu_backend = Some(backend);
         Ok(())
+    }
+
+    fn set_backend_req_fd(&self, backend: Backend) {
+        self.inner.lock().unwrap().backend = Some(backend);
     }
 
     fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
@@ -786,6 +807,11 @@ mod tests {
         let backend = GpuBackend::from_stream(backend);
 
         (frontend, backend)
+    }
+
+    fn dummy_backend_request_socket() -> Backend {
+        let (_, backend) = UnixStream::pair().unwrap();
+        Backend::from_stream(backend)
     }
 
     fn event_fd_into_file(event_fd: EventFd) -> File {

@@ -22,7 +22,7 @@ use vhost::vhost_user::{
         VhostUserGpuCursorPos, VhostUserGpuCursorUpdate, VhostUserGpuEdidRequest,
         VhostUserGpuScanout, VhostUserGpuUpdate,
     },
-    GpuBackend,
+    Backend, GpuBackend,
 };
 use vhost_user_backend::{VringRwLock, VringT};
 use vm_memory::{GuestAddress, GuestMemory, GuestMemoryMmap, VolatileSlice};
@@ -322,6 +322,7 @@ pub struct VirtioGpuScanout {
 
 pub struct RutabagaVirtioGpu {
     pub(crate) rutabaga: Rutabaga,
+    pub(crate) backend: Backend,
     pub(crate) gpu_backend: GpuBackend,
     pub(crate) resources: BTreeMap<u32, VirtioGpuResource>,
     pub(crate) fence_state: Arc<Mutex<FenceState>>,
@@ -400,7 +401,12 @@ impl RutabagaVirtioGpu {
             .set_use_external_blob(true)
     }
 
-    pub fn new(queue_ctl: &VringRwLock, gpu_config: &GpuConfig, gpu_backend: GpuBackend) -> Self {
+    pub fn new(
+        queue_ctl: &VringRwLock,
+        gpu_config: &GpuConfig,
+        backend: Backend,
+        gpu_backend: GpuBackend,
+    ) -> Self {
         let fence_state = Arc::new(Mutex::new(FenceState::default()));
         let fence = Self::create_fence_handler(queue_ctl.clone(), fence_state.clone());
         let rutabaga = Self::configure_rutabaga_builder(gpu_config)
@@ -409,8 +415,9 @@ impl RutabagaVirtioGpu {
 
         Self {
             rutabaga,
+            backend,
             gpu_backend,
-            resources: BTreeMap::default(),
+            resources: Default::default(),
             fence_state,
             scanouts: Default::default(),
         }
@@ -939,6 +946,11 @@ mod tests {
         GpuBackend::from_stream(backend)
     }
 
+    fn dummy_backend() -> Backend {
+        let (_, backend) = UnixStream::pair().unwrap();
+        Backend::from_stream(backend)
+    }
+
     fn new_gpu() -> RutabagaVirtioGpu {
         let config = GpuConfig::new(
             GpuMode::VirglRenderer,
@@ -951,8 +963,9 @@ mod tests {
         RutabagaVirtioGpu {
             rutabaga,
             gpu_backend: dummy_gpu_backend(),
-            resources: BTreeMap::default(),
-            fence_state: Arc::new(Mutex::new(FenceState::default())),
+            backend: dummy_backend(),
+            resources: Default::default(),
+            fence_state: Arc::new(Mutex::new(Default::default())),
             scanouts: Default::default(),
         }
     }
