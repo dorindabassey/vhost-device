@@ -8,7 +8,7 @@ use crate::{
     protocol::{
         virtio_gpu_box, virtio_gpu_ctrl_hdr, virtio_gpu_ctx_create, virtio_gpu_ctx_resource,
         virtio_gpu_cursor_pos, virtio_gpu_get_capset, virtio_gpu_get_capset_info,
-        virtio_gpu_get_edid, virtio_gpu_rect, virtio_gpu_resource_attach_backing,
+        virtio_gpu_get_edid, virtio_gpu_rect, virtio_gpu_resource_assign_uuid, virtio_gpu_resource_attach_backing,
         virtio_gpu_resource_create_2d, virtio_gpu_resource_create_3d,
         virtio_gpu_resource_detach_backing, virtio_gpu_resource_flush, virtio_gpu_resource_unref,
         virtio_gpu_set_scanout, virtio_gpu_transfer_host_3d, virtio_gpu_transfer_to_host_2d,
@@ -36,7 +36,7 @@ use thiserror::Error as ThisError;
 use vhost::vhost_user::{
     gpu_message::{VhostUserGpuCursorPos, VhostUserGpuEdidRequest},
     message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures},
-    GpuBackend,
+    Backend, GpuBackend,
 };
 use vhost_user_backend::{VhostUserBackend, VringEpollHandler, VringRwLock, VringT};
 use virtio_bindings::{
@@ -46,7 +46,7 @@ use virtio_bindings::{
     },
     virtio_gpu::{
         VIRTIO_GPU_F_CONTEXT_INIT, VIRTIO_GPU_F_EDID, VIRTIO_GPU_F_RESOURCE_BLOB,
-        VIRTIO_GPU_F_VIRGL,
+        VIRTIO_GPU_F_RESOURCE_UUID, VIRTIO_GPU_F_VIRGL,
     },
 };
 use virtio_queue::{QueueOwnedT, Reader, Writer};
@@ -102,6 +102,7 @@ struct VhostUserGpuBackendInner {
     virtio_cfg: VirtioGpuConfig,
     event_idx: bool,
     gpu_backend: Option<GpuBackend>,
+    backend: Option<Backend>,
     pub exit_event: EventFd,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     renderer: GpuMode,
@@ -126,6 +127,7 @@ impl VhostUserGpuBackend {
             },
             event_idx: false,
             gpu_backend: None,
+            backend: None,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
             mem: None,
             renderer: gpu_config.get_renderer(),
@@ -246,9 +248,9 @@ impl VhostUserGpuBackendInner {
                 let cursor = VhostUserGpuCursorPos { scanout_id, x, y };
                 virtio_gpu.move_cursor(resource_id, cursor)
             }
-            GpuCommand::ResourceAssignUuid(_info) => {
-                panic!("virtio_gpu: GpuCommand::ResourceAssignUuid unimplemented");
-            }
+            GpuCommand::ResourceAssignUuid(virtio_gpu_resource_assign_uuid {
+                resource_id, ..
+            }) => virtio_gpu.resource_assign_uuid(resource_id),
             GpuCommand::GetCapsetInfo(virtio_gpu_get_capset_info { capset_index, .. }) => {
                 virtio_gpu.get_capset_info(capset_index)
             }
@@ -575,6 +577,13 @@ impl VhostUserGpuBackendInner {
                         )
                     })?;
 
+                    let backend = self.backend.take().ok_or_else(|| {
+                        io::Error::new(
+                            ErrorKind::Other,
+                            "set_backend_req_fd() not called, Backend missing",
+                        )
+                    })?;
+
                     // We currently pass the CONTROL_QUEUE vring to RutabagaVirtioGpu, because we only
                     // expect to process fences for that queue.
                     let control_vring = &vrings[CONTROL_QUEUE as usize];
@@ -583,7 +592,7 @@ impl VhostUserGpuBackendInner {
                     // so if somehow another thread accidentally wants to create another gpu here,
                     // it will panic anyway
                     let virtio_gpu =
-                        RutabagaVirtioGpu::new(control_vring, self.renderer, gpu_backend);
+                        RutabagaVirtioGpu::new(control_vring, self.renderer, gpu_backend, backend);
                     event_poll_fd = virtio_gpu.get_event_poll_fd();
 
                     maybe_virtio_gpu.insert(virtio_gpu)
@@ -633,6 +642,7 @@ impl VhostUserBackend for VhostUserGpuBackend {
             | 1 << VIRTIO_RING_F_EVENT_IDX
             | 1 << VIRTIO_GPU_F_VIRGL
             | 1 << VIRTIO_GPU_F_EDID
+            | 1 << VIRTIO_GPU_F_RESOURCE_UUID
             | 1 << VIRTIO_GPU_F_RESOURCE_BLOB
             | 1 << VIRTIO_GPU_F_CONTEXT_INIT
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
@@ -640,7 +650,12 @@ impl VhostUserBackend for VhostUserGpuBackend {
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
         debug!("Protocol features called");
-        VhostUserProtocolFeatures::CONFIG | VhostUserProtocolFeatures::MQ
+        VhostUserProtocolFeatures::CONFIG
+            | VhostUserProtocolFeatures::MQ
+            | VhostUserProtocolFeatures::BACKEND_REQ
+            | VhostUserProtocolFeatures::BACKEND_SEND_FD
+            | VhostUserProtocolFeatures::REPLY_ACK
+            | VhostUserProtocolFeatures::SHARED_OBJECT
     }
 
     fn set_event_idx(&self, enabled: bool) {
@@ -656,6 +671,10 @@ impl VhostUserBackend for VhostUserGpuBackend {
 
     fn set_gpu_socket(&self, backend: GpuBackend) {
         self.inner.lock().unwrap().gpu_backend = Some(backend);
+    }
+
+    fn set_backend_req_fd(&self, backend: Backend) {
+        self.inner.lock().unwrap().backend = Some(backend);
     }
 
     fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
@@ -775,6 +794,11 @@ mod tests {
         let backend = GpuBackend::from_stream(backend);
 
         (frontend, backend)
+    }
+
+    fn dummy_backend_request_socket() -> Backend {
+        let (_, backend) = UnixStream::pair().unwrap();
+        Backend::from_stream(backend)
     }
 
     fn event_fd_into_file(event_fd: EventFd) -> File {
@@ -1337,17 +1361,23 @@ mod tests {
     fn test_verify_backend() {
         let gpu_config = GpuConfig::new(SOCKET_PATH.into(), GpuMode::ModeVirglRenderer);
         let backend = VhostUserGpuBackend::new(gpu_config).unwrap();
+        let backend_socket = dummy_backend_request_socket();
 
         assert_eq!(backend.num_queues(), NUM_QUEUES);
         assert_eq!(backend.max_queue_size(), QUEUE_SIZE);
         assert_eq!(backend.features(), 0x1017100001B);
         assert_eq!(
             backend.protocol_features(),
-            VhostUserProtocolFeatures::CONFIG | VhostUserProtocolFeatures::MQ
+            VhostUserProtocolFeatures::CONFIG
+                | VhostUserProtocolFeatures::MQ
+                | VhostUserProtocolFeatures::BACKEND_REQ
+                | VhostUserProtocolFeatures::BACKEND_SEND_FD
+                | VhostUserProtocolFeatures::REPLY_ACK
         );
         assert_eq!(backend.queues_per_thread(), vec![0xffff_ffff]);
         assert_eq!(backend.get_config(0, 0), vec![]);
         backend.set_gpu_socket(gpu_backend_pair().1);
+        backend.set_backend_req_fd(backend_socket);
 
         backend.set_event_idx(true);
         assert!(backend.inner.lock().unwrap().event_idx);
@@ -1467,6 +1497,8 @@ mod tests {
     fn test_display_output() {
         let (backend, mem) = init();
         let (mut gpu_frontend, gpu_backend) = gpu_backend_pair();
+        let backend_socket = dummy_backend_request_socket();
+
         gpu_frontend
             .set_read_timeout(Some(Duration::from_secs(10)))
             .unwrap();
@@ -1474,6 +1506,7 @@ mod tests {
             .set_write_timeout(Some(Duration::from_secs(10)))
             .unwrap();
 
+        backend.set_backend_req_fd(backend_socket);
         backend.set_gpu_socket(gpu_backend);
 
         // Unfortunately there is no way to crate a VringEpollHandler directly (the ::new is not public)

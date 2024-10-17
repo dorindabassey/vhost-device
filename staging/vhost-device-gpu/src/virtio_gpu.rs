@@ -17,12 +17,15 @@ use rutabaga_gfx::{
     ResourceCreate3D, ResourceCreateBlob, Rutabaga, RutabagaBuilder, RutabagaComponentType,
     RutabagaFence, RutabagaFenceHandler, RutabagaIntoRawDescriptor, RutabagaIovec, Transfer3D,
 };
+use uuid::Uuid;
+use vhost::vhost_user::message::VhostUserSharedMsg;
 use vhost::vhost_user::{
+    VhostUserFrontendReqHandler,
     gpu_message::{
         VhostUserGpuCursorPos, VhostUserGpuCursorUpdate, VhostUserGpuEdidRequest,
         VhostUserGpuScanout, VhostUserGpuUpdate,
     },
-    GpuBackend,
+    Backend, GpuBackend,
 };
 use vhost_user_backend::{VringRwLock, VringT};
 use vm_memory::{GuestAddress, GuestMemory, GuestMemoryMmap, VolatileSlice};
@@ -310,6 +313,7 @@ pub struct VirtioGpuScanout {
 pub struct RutabagaVirtioGpu {
     pub(crate) rutabaga: Rutabaga,
     pub(crate) gpu_backend: GpuBackend,
+    pub(crate) backend: Backend,
     pub(crate) resources: BTreeMap<u32, VirtioGpuResource>,
     pub(crate) fence_state: Arc<Mutex<FenceState>>,
     pub(crate) scanouts: [Option<VirtioGpuScanout>; VIRTIO_GPU_MAX_SCANOUTS],
@@ -373,7 +377,12 @@ impl RutabagaVirtioGpu {
         })
     }
 
-    pub fn new(queue_ctl: &VringRwLock, renderer: GpuMode, gpu_backend: GpuBackend) -> Self {
+    pub fn new(
+        queue_ctl: &VringRwLock,
+        renderer: GpuMode,
+        gpu_backend: GpuBackend,
+        backend: Backend,
+    ) -> Self {
         let component = match renderer {
             GpuMode::ModeVirglRenderer => RutabagaComponentType::VirglRenderer,
             GpuMode::ModeGfxstream => RutabagaComponentType::Gfxstream,
@@ -394,6 +403,7 @@ impl RutabagaVirtioGpu {
         Self {
             rutabaga,
             gpu_backend,
+            backend,
             resources: Default::default(),
             fence_state,
             scanouts: Default::default(),
@@ -737,17 +747,25 @@ impl VirtioGpu for RutabagaVirtioGpu {
     }
 
     fn resource_assign_uuid(&self, resource_id: u32) -> VirtioGpuResult {
-        if !self.resources.contains_key(&resource_id) {
-            return Err(ErrInvalidResourceId);
-        }
+        debug_assert!(
+            self.resources.contains_key(&resource_id),
+            "Resource ID {} doesn't exists in the resources map.",
+            resource_id
+        );
 
-        // TODO(stevensd): use real uuids once the virtio wayland protocol is updated to
-        // handle more than 32 bits. For now, the virtwl driver knows that the uuid is
-        // actually just the resource id.
-        let mut uuid: [u8; 16] = [0; 16];
-        for (idx, byte) in resource_id.to_be_bytes().iter().enumerate() {
-            uuid[12 + idx] = *byte;
-        }
+        let shared_msg = VhostUserSharedMsg {
+            uuid: Uuid::new_v4(),
+        };
+            
+        self.backend.shared_object_add(&shared_msg).map_err(|e| {
+            error!(
+                "Failed to send vhost-user shared-object add request to the frontend: {}",
+                e
+            );
+            ErrUnspec
+        })?;
+        let uuid = shared_msg.uuid.into_bytes();
+
         Ok(OkResourceUuid { uuid })
     }
 
@@ -880,6 +898,11 @@ mod tests {
         GpuBackend::from_stream(backend)
     }
 
+    fn dummy_backend() -> Backend {
+        let (_, backend) = UnixStream::pair().unwrap();
+        Backend::from_stream(backend)
+    }
+
     fn new_gpu() -> RutabagaVirtioGpu {
         let rutabaga = RutabagaBuilder::new(RutabagaComponentType::VirglRenderer, 0)
             .set_use_egl(true)
@@ -892,6 +915,7 @@ mod tests {
         RutabagaVirtioGpu {
             rutabaga,
             gpu_backend: dummy_gpu_backend(),
+            backend: dummy_backend(),
             resources: Default::default(),
             fence_state: Arc::new(Mutex::new(Default::default())),
             scanouts: Default::default(),
