@@ -938,6 +938,28 @@ mod tests {
 
     rusty_fork_test! {
         #[test]
+        fn test_update_cursor_fails() {
+            let mut virtio_gpu = new_gpu();
+
+            let cursor_pos = VhostUserGpuCursorPos {
+                scanout_id: 1,
+                x: 123,
+                y: 123,
+            };
+
+            // The resource doesn't exist
+            let result = virtio_gpu.update_cursor(1, cursor_pos, 0, 0);
+            assert_matches!(result, Err(ErrInvalidResourceId));
+
+            // Create a resource
+            virtio_gpu.resource_create_3d(1, CREATE_RESOURCE_2D_720P).unwrap();
+
+            // The resource exists, but the dimensions are wrong
+            let result = virtio_gpu.update_cursor(1, cursor_pos, 0, 0);
+            assert_matches!(result, Err(ErrInvalidParameter));
+        }
+
+        #[test]
         fn test_create_and_unref_resources() {
             let mut virtio_gpu = new_gpu();
 
