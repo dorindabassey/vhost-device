@@ -380,17 +380,21 @@ impl RutabagaVirtioGpu {
         })
     }
 
-    pub fn new(queue_ctl: &VringRwLock, gpu_mode: GpuMode, gpu_backend: GpuBackend) -> Self {
+    fn configure_rutabaga_builder(gpu_mode: GpuMode) -> RutabagaBuilder {
         let component = match gpu_mode {
             GpuMode::VirglRenderer => RutabagaComponentType::VirglRenderer,
             GpuMode::Gfxstream => RutabagaComponentType::Gfxstream,
         };
-        let builder = RutabagaBuilder::new(component, 0)
+        RutabagaBuilder::new(component, 0)
             .set_use_egl(true)
             .set_use_gles(true)
             .set_use_glx(true)
             .set_use_surfaceless(true)
-            .set_use_external_blob(true);
+            .set_use_external_blob(true)
+    }
+
+    pub fn new(queue_ctl: &VringRwLock, gpu_mode: GpuMode, gpu_backend: GpuBackend) -> Self {
+        let builder = Self::configure_rutabaga_builder(gpu_mode);
 
         let fence_state = Arc::new(Mutex::new(Default::default()));
         let fence = Self::create_fence_handler(queue_ctl.clone(), fence_state.clone());
@@ -886,7 +890,7 @@ mod tests {
 
     use assert_matches::assert_matches;
     use rusty_fork::rusty_fork_test;
-    use rutabaga_gfx::{RutabagaBuilder, RutabagaComponentType, RutabagaHandler};
+    use rutabaga_gfx::RutabagaHandler;
 
     use super::*;
 
@@ -896,14 +900,8 @@ mod tests {
     }
 
     fn new_gpu() -> RutabagaVirtioGpu {
-        let rutabaga = RutabagaBuilder::new(RutabagaComponentType::VirglRenderer, 0)
-            .set_use_egl(true)
-            .set_use_gles(true)
-            .set_use_glx(true)
-            .set_use_egl(true)
-            .set_use_surfaceless(true)
-            .build(RutabagaHandler::new(|_| {}), None)
-            .unwrap();
+        let builder = RutabagaVirtioGpu::configure_rutabaga_builder(GpuMode::VirglRenderer);
+        let rutabaga = builder.build(RutabagaHandler::new(|_| {}), None).unwrap();
         RutabagaVirtioGpu {
             rutabaga,
             gpu_backend: dummy_gpu_backend(),
