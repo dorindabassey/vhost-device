@@ -1358,7 +1358,10 @@ mod tests {
             );
             assert_eq!(backend.queues_per_thread(), vec![0xffff_ffff]);
             assert_eq!(backend.get_config(0, 0), vec![]);
+
+            assert!(backend.inner.lock().unwrap().gpu_backend.is_none());
             backend.set_gpu_socket(gpu_backend_pair().1).unwrap();
+            assert!(backend.inner.lock().unwrap().gpu_backend.is_some());
 
             backend.set_event_idx(true);
             assert!(backend.inner.lock().unwrap().event_idx_enabled);
