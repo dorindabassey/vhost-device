@@ -584,6 +584,9 @@ impl VirtioGpu for RutabagaVirtioGpu {
     }
 
     fn unref_resource(&mut self, resource_id: u32) -> VirtioGpuResult {
+        if self.resources.remove(&resource_id).is_none() {
+            return Err(ErrInvalidResourceId);
+        }
         self.rutabaga.unref_resource(resource_id)?;
         Ok(OkNoData)
     }
