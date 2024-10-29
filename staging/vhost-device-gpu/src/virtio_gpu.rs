@@ -12,7 +12,7 @@ use std::{
 };
 
 use libc::c_void;
-use log::{debug, error, trace};
+use log::{debug, error, trace, warn};
 use rutabaga_gfx::{
     ResourceCreate3D, ResourceCreateBlob, Rutabaga, RutabagaBuilder, RutabagaComponentType,
     RutabagaFence, RutabagaFenceHandler, RutabagaIntoRawDescriptor, RutabagaIovec, Transfer3D,
@@ -263,6 +263,10 @@ impl AssociatedScanouts {
 
     fn disable(&mut self, scanout_id: u32) {
         self.0 ^= 1 << scanout_id;
+    }
+
+    const fn has_any_enabled(&self) -> bool {
+        self.0 != 0
     }
 
     fn iter_enabled(self) -> impl Iterator<Item = u32> {
@@ -584,8 +588,20 @@ impl VirtioGpu for RutabagaVirtioGpu {
     }
 
     fn unref_resource(&mut self, resource_id: u32) -> VirtioGpuResult {
-        if self.resources.remove(&resource_id).is_none() {
-            return Err(ErrInvalidResourceId);
+        let resource = self.resources.remove(&resource_id);
+        match resource {
+            None => return Err(ErrInvalidResourceId),
+            // The spec doesn't say anything about this situation and this doesn't actually seem
+            // to happen in practise but let's be careful and refuse to disable the resource.
+            // This keeps the internal state of the gpu device and the fronted consistent.
+            Some(resource) if resource.scanouts.has_any_enabled() => {
+                warn!(
+                    "The driver requested unref_resource, but resource {resource_id} has \
+                     associated scanouts, refusing to delete the resource."
+                );
+                return Err(ErrUnspec);
+            }
+            _ => (),
         }
         self.rutabaga.unref_resource(resource_id)?;
         Ok(OkNoData)
