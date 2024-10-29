@@ -770,19 +770,9 @@ impl VirtioGpu for RutabagaVirtioGpu {
         Ok(OkNoData)
     }
 
-    fn resource_assign_uuid(&self, resource_id: u32) -> VirtioGpuResult {
-        if !self.resources.contains_key(&resource_id) {
-            return Err(ErrInvalidResourceId);
-        }
-
-        // TODO: use real uuids once the shared object patch fix is upstreamed.
-        // patch: https://mail.gnu.org/archive/html/qemu-devel/2024-10/msg02865.html
-        // for now the uuid is actually just the resource id.
-        let mut uuid: [u8; 16] = [0; 16];
-        for (idx, byte) in resource_id.to_be_bytes().iter().enumerate() {
-            uuid[12 + idx] = *byte;
-        }
-        Ok(OkResourceUuid { uuid })
+    fn resource_assign_uuid(&self, _resource_id: u32) -> VirtioGpuResult {
+        error!("Not implemented: resource_assign_uuid");
+        Err(ErrUnspec)
     }
 
     fn get_capset_info(&self, index: u32) -> VirtioGpuResult {
