@@ -1358,7 +1358,7 @@ mod tests {
             );
             assert_eq!(backend.queues_per_thread(), vec![0xffff_ffff]);
             assert_eq!(backend.get_config(0, 0), vec![]);
-            assert!(backend.set_gpu_socket(gpu_backend_pair().1).is_ok());
+            backend.set_gpu_socket(gpu_backend_pair().1).unwrap();
 
             backend.set_event_idx(true);
             assert!(backend.inner.lock().unwrap().event_idx_enabled);
@@ -1484,8 +1484,7 @@ mod tests {
         gpu_frontend
             .set_write_timeout(Some(Duration::from_secs(10)))
             .unwrap();
-
-        assert!(backend.set_gpu_socket(gpu_backend).is_ok());
+        backend.set_gpu_socket(gpu_backend).unwrap();
 
         // Unfortunately there is no way to crate a VringEpollHandler directly (the ::new is not public)
         // So we create a daemon to create the epoll handler for us here

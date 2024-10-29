@@ -89,7 +89,7 @@ mod tests {
     fn test_gpu_config() {
         // Test the creation of GpuConfig struct
         let test_dir = tempdir().expect("Could not create a temp test directory.");
-        let socket_path = test_dir.path().join("/tmp/socket");
+        let socket_path = test_dir.path().join("socket");
         let gpu_config = GpuConfig::new(socket_path.clone(), GpuMode::VirglRenderer);
         assert_eq!(gpu_config.get_socket_path(), socket_path);
     }

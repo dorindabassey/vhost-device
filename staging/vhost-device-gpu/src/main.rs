@@ -101,7 +101,7 @@ mod tests {
     #[test]
     fn test_parse_successful() {
         let test_dir = tempdir().expect("Could not create a temp test directory.");
-        let socket_path = test_dir.path().join("/tmp/vgpu.sock");
+        let socket_path = test_dir.path().join("vgpu.sock");
 
         let cmd_args = GpuArgs::from_args(socket_path.as_path());
         let config = GpuConfig::from(cmd_args);
