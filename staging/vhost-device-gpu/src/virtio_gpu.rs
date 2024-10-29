@@ -893,9 +893,25 @@ mod tests {
 
     use assert_matches::assert_matches;
     use rusty_fork::rusty_fork_test;
-    use rutabaga_gfx::RutabagaHandler;
+    use rutabaga_gfx::{
+        RutabagaHandler, RUTABAGA_PIPE_BIND_RENDER_TARGET, RUTABAGA_PIPE_TEXTURE_2D,
+    };
 
     use super::*;
+    use crate::protocol::VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM;
+
+    const CREATE_RESOURCE_2D_720P: ResourceCreate3D = ResourceCreate3D {
+        target: RUTABAGA_PIPE_TEXTURE_2D,
+        format: VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM,
+        bind: RUTABAGA_PIPE_BIND_RENDER_TARGET,
+        width: 1280,
+        height: 720,
+        depth: 1,
+        array_size: 1,
+        last_level: 0,
+        nr_samples: 0,
+        flags: 0,
+    };
 
     fn dummy_gpu_backend() -> GpuBackend {
         let (_, backend) = UnixStream::pair().unwrap();
@@ -915,6 +931,26 @@ mod tests {
     }
 
     rusty_fork_test! {
+        #[test]
+        fn test_create_and_unref_resources() {
+            let mut virtio_gpu = new_gpu();
+
+            // No resources exists, cannot unref anything:
+            assert!(virtio_gpu.resources.is_empty());
+            let result = virtio_gpu.unref_resource(0);
+            assert_matches!(result, Err(_));
+
+            // Create a resource
+            let result = virtio_gpu.resource_create_3d(1, CREATE_RESOURCE_2D_720P);
+            assert_matches!(result, Ok(_));
+            assert_eq!(virtio_gpu.resources.len(), 1);
+
+            // Unref the created resource
+            let result = virtio_gpu.unref_resource(1);
+            assert_matches!(result, Ok(_));
+            assert!(virtio_gpu.resources.is_empty());
+        }
+
         #[test]
         fn test_gpu_capset() {
             let virtio_gpu = new_gpu();
