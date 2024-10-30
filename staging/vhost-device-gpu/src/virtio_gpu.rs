@@ -12,7 +12,7 @@ use std::{
 };
 
 use libc::c_void;
-use log::{debug, error, trace};
+use log::{debug, error, trace, warn};
 use rutabaga_gfx::{
     ResourceCreate3D, ResourceCreateBlob, Rutabaga, RutabagaBuilder, RutabagaComponentType,
     RutabagaFence, RutabagaFenceHandler, RutabagaIntoRawDescriptor, RutabagaIovec, Transfer3D,
@@ -265,6 +265,10 @@ impl AssociatedScanouts {
         self.0 ^= 1 << scanout_id;
     }
 
+    const fn has_any_enabled(&self) -> bool {
+        self.0 != 0
+    }
+
     fn iter_enabled(self) -> impl Iterator<Item = u32> {
         (0..VIRTIO_GPU_MAX_SCANOUTS)
             .filter(move |i| ((self.0 >> i) & 1) == 1)
@@ -380,17 +384,21 @@ impl RutabagaVirtioGpu {
         })
     }
 
-    pub fn new(queue_ctl: &VringRwLock, gpu_mode: GpuMode, gpu_backend: GpuBackend) -> Self {
+    fn configure_rutabaga_builder(gpu_mode: GpuMode) -> RutabagaBuilder {
         let component = match gpu_mode {
             GpuMode::VirglRenderer => RutabagaComponentType::VirglRenderer,
             GpuMode::Gfxstream => RutabagaComponentType::Gfxstream,
         };
-        let builder = RutabagaBuilder::new(component, 0)
+        RutabagaBuilder::new(component, 0)
             .set_use_egl(true)
             .set_use_gles(true)
             .set_use_glx(true)
             .set_use_surfaceless(true)
-            .set_use_external_blob(true);
+            .set_use_external_blob(true)
+    }
+
+    pub fn new(queue_ctl: &VringRwLock, gpu_mode: GpuMode, gpu_backend: GpuBackend) -> Self {
+        let builder = Self::configure_rutabaga_builder(gpu_mode);
 
         let fence_state = Arc::new(Mutex::new(Default::default()));
         let fence = Self::create_fence_handler(queue_ctl.clone(), fence_state.clone());
@@ -580,6 +588,21 @@ impl VirtioGpu for RutabagaVirtioGpu {
     }
 
     fn unref_resource(&mut self, resource_id: u32) -> VirtioGpuResult {
+        let resource = self.resources.remove(&resource_id);
+        match resource {
+            None => return Err(ErrInvalidResourceId),
+            // The spec doesn't say anything about this situation and this doesn't actually seem
+            // to happen in practise but let's be careful and refuse to disable the resource.
+            // This keeps the internal state of the gpu device and the fronted consistent.
+            Some(resource) if resource.scanouts.has_any_enabled() => {
+                warn!(
+                    "The driver requested unref_resource, but resource {resource_id} has \
+                     associated scanouts, refusing to delete the resource."
+                );
+                return Err(ErrUnspec);
+            }
+            _ => (),
+        }
         self.rutabaga.unref_resource(resource_id)?;
         Ok(OkNoData)
     }
@@ -747,19 +770,9 @@ impl VirtioGpu for RutabagaVirtioGpu {
         Ok(OkNoData)
     }
 
-    fn resource_assign_uuid(&self, resource_id: u32) -> VirtioGpuResult {
-        if !self.resources.contains_key(&resource_id) {
-            return Err(ErrInvalidResourceId);
-        }
-
-        // TODO: use real uuids once the shared object patch fix is upstreamed.
-        // patch: https://mail.gnu.org/archive/html/qemu-devel/2024-10/msg02865.html
-        // for now the uuid is actually just the resource id.
-        let mut uuid: [u8; 16] = [0; 16];
-        for (idx, byte) in resource_id.to_be_bytes().iter().enumerate() {
-            uuid[12 + idx] = *byte;
-        }
-        Ok(OkResourceUuid { uuid })
+    fn resource_assign_uuid(&self, _resource_id: u32) -> VirtioGpuResult {
+        error!("Not implemented: resource_assign_uuid");
+        Err(ErrUnspec)
     }
 
     fn get_capset_info(&self, index: u32) -> VirtioGpuResult {
@@ -886,9 +899,25 @@ mod tests {
 
     use assert_matches::assert_matches;
     use rusty_fork::rusty_fork_test;
-    use rutabaga_gfx::{RutabagaBuilder, RutabagaComponentType, RutabagaHandler};
+    use rutabaga_gfx::{
+        RutabagaHandler, RUTABAGA_PIPE_BIND_RENDER_TARGET, RUTABAGA_PIPE_TEXTURE_2D,
+    };
 
     use super::*;
+    use crate::protocol::VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM;
+
+    const CREATE_RESOURCE_2D_720P: ResourceCreate3D = ResourceCreate3D {
+        target: RUTABAGA_PIPE_TEXTURE_2D,
+        format: VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM,
+        bind: RUTABAGA_PIPE_BIND_RENDER_TARGET,
+        width: 1280,
+        height: 720,
+        depth: 1,
+        array_size: 1,
+        last_level: 0,
+        nr_samples: 0,
+        flags: 0,
+    };
 
     fn dummy_gpu_backend() -> GpuBackend {
         let (_, backend) = UnixStream::pair().unwrap();
@@ -896,14 +925,8 @@ mod tests {
     }
 
     fn new_gpu() -> RutabagaVirtioGpu {
-        let rutabaga = RutabagaBuilder::new(RutabagaComponentType::VirglRenderer, 0)
-            .set_use_egl(true)
-            .set_use_gles(true)
-            .set_use_glx(true)
-            .set_use_egl(true)
-            .set_use_surfaceless(true)
-            .build(RutabagaHandler::new(|_| {}), None)
-            .unwrap();
+        let builder = RutabagaVirtioGpu::configure_rutabaga_builder(GpuMode::VirglRenderer);
+        let rutabaga = builder.build(RutabagaHandler::new(|_| {}), None).unwrap();
         RutabagaVirtioGpu {
             rutabaga,
             gpu_backend: dummy_gpu_backend(),
@@ -914,6 +937,48 @@ mod tests {
     }
 
     rusty_fork_test! {
+        #[test]
+        fn test_update_cursor_fails() {
+            let mut virtio_gpu = new_gpu();
+
+            let cursor_pos = VhostUserGpuCursorPos {
+                scanout_id: 1,
+                x: 123,
+                y: 123,
+            };
+
+            // The resource doesn't exist
+            let result = virtio_gpu.update_cursor(1, cursor_pos, 0, 0);
+            assert_matches!(result, Err(ErrInvalidResourceId));
+
+            // Create a resource
+            virtio_gpu.resource_create_3d(1, CREATE_RESOURCE_2D_720P).unwrap();
+
+            // The resource exists, but the dimensions are wrong
+            let result = virtio_gpu.update_cursor(1, cursor_pos, 0, 0);
+            assert_matches!(result, Err(ErrInvalidParameter));
+        }
+
+        #[test]
+        fn test_create_and_unref_resources() {
+            let mut virtio_gpu = new_gpu();
+
+            // No resources exists, cannot unref anything:
+            assert!(virtio_gpu.resources.is_empty());
+            let result = virtio_gpu.unref_resource(0);
+            assert_matches!(result, Err(_));
+
+            // Create a resource
+            let result = virtio_gpu.resource_create_3d(1, CREATE_RESOURCE_2D_720P);
+            assert_matches!(result, Ok(_));
+            assert_eq!(virtio_gpu.resources.len(), 1);
+
+            // Unref the created resource
+            let result = virtio_gpu.unref_resource(1);
+            assert_matches!(result, Ok(_));
+            assert!(virtio_gpu.resources.is_empty());
+        }
+
         #[test]
         fn test_gpu_capset() {
             let virtio_gpu = new_gpu();

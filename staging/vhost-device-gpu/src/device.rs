@@ -385,7 +385,7 @@ impl VhostUserGpuBackendInner {
 
         let ctrl_hdr = match GpuCommand::decode(reader) {
             Ok((ctrl_hdr, gpu_cmd)) => {
-                let cmd_name = gpu_cmd.get_type_name();
+                let cmd_name = gpu_cmd.name();
                 let response_result = self.process_gpu_command(virtio_gpu, &mem, ctrl_hdr, gpu_cmd);
                 // Unwrap the response from inside Result and log information
                 response = match response_result {
@@ -1358,7 +1358,10 @@ mod tests {
             );
             assert_eq!(backend.queues_per_thread(), vec![0xffff_ffff]);
             assert_eq!(backend.get_config(0, 0), vec![]);
-            assert!(backend.set_gpu_socket(gpu_backend_pair().1).is_ok());
+
+            assert!(backend.inner.lock().unwrap().gpu_backend.is_none());
+            backend.set_gpu_socket(gpu_backend_pair().1).unwrap();
+            assert!(backend.inner.lock().unwrap().gpu_backend.is_some());
 
             backend.set_event_idx(true);
             assert!(backend.inner.lock().unwrap().event_idx_enabled);
@@ -1484,8 +1487,7 @@ mod tests {
         gpu_frontend
             .set_write_timeout(Some(Duration::from_secs(10)))
             .unwrap();
-
-        assert!(backend.set_gpu_socket(gpu_backend).is_ok());
+        backend.set_gpu_socket(gpu_backend).unwrap();
 
         // Unfortunately there is no way to crate a VringEpollHandler directly (the ::new is not public)
         // So we create a daemon to create the epoll handler for us here

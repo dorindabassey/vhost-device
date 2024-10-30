@@ -722,41 +722,41 @@ impl From<device::Error> for GpuResponseEncodeError {
 
 impl fmt::Debug for GpuCommand {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::GpuCommand::*;
-        match self {
-            GetDisplayInfo => f.debug_struct("GetDisplayInfo").finish(),
-            GetEdid(_info) => f.debug_struct("GetEdid").finish(),
-            ResourceCreate2d(_info) => f.debug_struct("ResourceCreate2d").finish(),
-            ResourceUnref(_info) => f.debug_struct("ResourceUnref").finish(),
-            SetScanout(_info) => f.debug_struct("SetScanout").finish(),
-            SetScanoutBlob(_info) => f.debug_struct("SetScanoutBlob").finish(),
-            ResourceFlush(_info) => f.debug_struct("ResourceFlush").finish(),
-            TransferToHost2d(_info) => f.debug_struct("TransferToHost2d").finish(),
-            ResourceAttachBacking(_info, _vecs) => f.debug_struct("ResourceAttachBacking").finish(),
-            ResourceDetachBacking(_info) => f.debug_struct("ResourceDetachBacking").finish(),
-            GetCapsetInfo(_info) => f.debug_struct("GetCapsetInfo").finish(),
-            GetCapset(_info) => f.debug_struct("GetCapset").finish(),
-            CtxCreate(_info) => f.debug_struct("CtxCreate").finish(),
-            CtxDestroy(_info) => f.debug_struct("CtxDestroy").finish(),
-            CtxAttachResource(_info) => f.debug_struct("CtxAttachResource").finish(),
-            CtxDetachResource(_info) => f.debug_struct("CtxDetachResource").finish(),
-            ResourceCreate3d(_info) => f.debug_struct("ResourceCreate3d").finish(),
-            TransferToHost3d(_info) => f.debug_struct("TransferToHost3d").finish(),
-            TransferFromHost3d(_info) => f.debug_struct("TransferFromHost3d").finish(),
-            CmdSubmit3d { .. } => f.debug_struct("CmdSubmit3d").finish(),
-            ResourceCreateBlob(_info) => f.debug_struct("ResourceCreateBlob").finish(),
-            ResourceMapBlob(_info) => f.debug_struct("ResourceMapBlob").finish(),
-            ResourceUnmapBlob(_info) => f.debug_struct("ResourceUnmapBlob").finish(),
-            UpdateCursor(_info) => f.debug_struct("UpdateCursor").finish(),
-            MoveCursor(_info) => f.debug_struct("MoveCursor").finish(),
-            ResourceAssignUuid(_info) => f.debug_struct("ResourceAssignUuid").finish(),
-        }
+        f.debug_struct(self.name()).finish()
     }
 }
 
 impl GpuCommand {
-    pub fn get_type_name(&self) -> &'static str {
-        std::any::type_name::<Self>()
+    pub fn name(&self) -> &'static str {
+        use GpuCommand::*;
+        match self {
+            GetDisplayInfo => "GetDisplayInfo",
+            GetEdid(_info) => "GetEdid",
+            ResourceCreate2d(_info) => "ResourceCreate2d",
+            ResourceUnref(_info) => "ResourceUnref",
+            SetScanout(_info) => "SetScanout",
+            SetScanoutBlob(_info) => "SetScanoutBlob",
+            ResourceFlush(_info) => "ResourceFlush",
+            TransferToHost2d(_info) => "TransferToHost2d",
+            ResourceAttachBacking(_info, _vecs) => "ResourceAttachBacking",
+            ResourceDetachBacking(_info) => "ResourceDetachBacking",
+            GetCapsetInfo(_info) => "GetCapsetInfo",
+            GetCapset(_info) => "GetCapset",
+            CtxCreate(_info) => "CtxCreate",
+            CtxDestroy(_info) => "CtxDestroy",
+            CtxAttachResource(_info) => "CtxAttachResource",
+            CtxDetachResource(_info) => "CtxDetachResource",
+            ResourceCreate3d(_info) => "ResourceCreate3d",
+            TransferToHost3d(_info) => "TransferToHost3d",
+            TransferFromHost3d(_info) => "TransferFromHost3d",
+            CmdSubmit3d { .. } => "CmdSubmit3d",
+            ResourceCreateBlob(_info) => "ResourceCreateBlob",
+            ResourceMapBlob(_info) => "ResourceMapBlob",
+            ResourceUnmapBlob(_info) => "ResourceUnmapBlob",
+            UpdateCursor(_info) => "UpdateCursor",
+            MoveCursor(_info) => "MoveCursor",
+            ResourceAssignUuid(_info) => "ResourceAssignUuid",
+        }
     }
     /// Decodes a command from the given chunk of memory.
     pub fn decode(
