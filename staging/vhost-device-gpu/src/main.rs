@@ -47,7 +47,7 @@ impl From<GpuArgs> for GpuConfig {
     }
 }
 
-fn start_backend(config: GpuConfig) -> Result<()> {
+fn start_backend(config: &GpuConfig) -> Result<()> {
     info!("Starting backend");
     let socket = config.socket_path();
     let backend = VhostUserGpuBackend::new(config).map_err(Error::CouldNotCreateBackend)?;
@@ -74,7 +74,7 @@ compile_error!("musl is not supported yet");
 fn main() {
     env_logger::init();
 
-    if let Err(e) = start_backend(GpuConfig::from(GpuArgs::parse())) {
+    if let Err(e) = start_backend(&GpuConfig::from(GpuArgs::parse())) {
         error!("{e}");
         exit(1);
     }
@@ -116,6 +116,6 @@ mod tests {
         let cmd_args = GpuArgs::from_args(socket_name);
         let config = GpuConfig::from(cmd_args);
 
-        assert_matches!(start_backend(config).unwrap_err(), Error::ServeFailed(_));
+        assert_matches!(start_backend(&config).unwrap_err(), Error::ServeFailed(_));
     }
 }

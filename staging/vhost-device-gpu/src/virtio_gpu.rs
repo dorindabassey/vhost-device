@@ -31,8 +31,13 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::{
     device::Error,
     protocol::{
-        virtio_gpu_rect, GpuResponse, GpuResponse::*, GpuResponsePlaneInfo, VirtioGpuResult,
-        VIRTIO_GPU_FLAG_INFO_RING_IDX, VIRTIO_GPU_MAX_SCANOUTS,
+        virtio_gpu_rect, GpuResponse,
+        GpuResponse::{
+            ErrInvalidParameter, ErrInvalidResourceId, ErrInvalidScanoutId, ErrUnspec, OkCapset,
+            OkCapsetInfo, OkDisplayInfo, OkEdid, OkNoData, OkResourcePlaneInfo,
+        },
+        GpuResponsePlaneInfo, VirtioGpuResult, VIRTIO_GPU_FLAG_INFO_RING_IDX,
+        VIRTIO_GPU_MAX_SCANOUTS,
     },
     GpuMode,
 };
@@ -87,11 +92,11 @@ pub trait VirtioGpu {
 
     /// Uses the hypervisor to map the rutabaga blob resource.
     ///
-    /// When sandboxing is disabled, external_blob is unset and opaque fds are
-    /// mapped by rutabaga as ExternalMapping.
-    /// When sandboxing is enabled, external_blob is set and opaque fds must be
-    /// mapped in the hypervisor process by Vulkano using metadata provided
-    /// by Rutabaga::vulkan_info().
+    /// When sandboxing is disabled, `external_blob` is unset and opaque fds are
+    /// mapped by rutabaga as `ExternalMapping`.
+    /// When sandboxing is enabled, `external_blob` is set and opaque fds must
+    /// be mapped in the hypervisor process by Vulkano using metadata
+    /// provided by `Rutabaga::vulkan_info()`.
     fn resource_map_blob(&mut self, resource_id: u32, offset: u64) -> VirtioGpuResult;
 
     /// Creates a blob resource using rutabaga.
@@ -112,7 +117,7 @@ pub trait VirtioGpu {
         len: u32,
     ) -> bool;
 
-    /// Creates a fence with the RutabagaFence that can be used to determine
+    /// Creates a fence with the `RutabagaFence` that can be used to determine
     /// when the previous command completed.
     fn create_fence(&mut self, rutabaga_fence: RutabagaFence) -> VirtioGpuResult;
 
@@ -149,7 +154,7 @@ pub trait VirtioGpu {
         rect: Rectangle,
     ) -> VirtioGpuResult;
 
-    /// Creates a 3D resource with the given properties and resource_id.
+    /// Creates a 3D resource with the given properties and `resource_id`.
     fn resource_create_3d(
         &mut self,
         resource_id: u32,
@@ -186,7 +191,7 @@ pub trait VirtioGpu {
 
     /// Attaches backing memory to the given resource, represented by a `Vec` of
     /// `(address, size)` tuples in the guest's physical address space.
-    /// Converts to RutabagaIovec from the memory mapping.
+    /// Converts to `RutabagaIovec` from the memory mapping.
     fn attach_backing(
         &mut self,
         resource_id: u32,
@@ -197,7 +202,7 @@ pub trait VirtioGpu {
     /// Detaches any previously attached iovecs from the resource.
     fn detach_backing(&mut self, resource_id: u32) -> VirtioGpuResult;
 
-    /// Updates the cursor's memory to the given resource_id, and sets its
+    /// Updates the cursor's memory to the given `resource_id`, and sets its
     /// position to the given coordinates.
     fn update_cursor(
         &mut self,
@@ -227,7 +232,7 @@ pub trait VirtioGpu {
         context_name: Option<&'a str>,
     ) -> VirtioGpuResult;
 
-    /// Get an EventFd descriptor, that signals when to call event_poll.
+    /// Get an `EventFd` descriptor, that signals when to call `event_poll`.
     fn get_event_poll_fd(&self) -> Option<EventFd>;
 
     /// Polls the Rutabaga backend.
@@ -265,7 +270,7 @@ impl AssociatedScanouts {
         self.0 ^= 1 << scanout_id;
     }
 
-    const fn has_any_enabled(&self) -> bool {
+    const fn has_any_enabled(self) -> bool {
         self.0 != 0
     }
 
@@ -302,13 +307,14 @@ impl VirtioGpuResource {
 }
 
 impl VirtioGpuResource {
-    /// Creates a new VirtioGpuResource with 2D/3D metadata
+    /// Creates a new `VirtioGpuResource` with 2D/3D metadata
+    #[must_use]
     pub fn new(resource_id: u32, width: u32, height: u32) -> Self {
         Self {
             id: resource_id,
             width,
             height,
-            scanouts: Default::default(),
+            scanouts: AssociatedScanouts::default(),
         }
     }
 }
@@ -397,8 +403,9 @@ impl RutabagaVirtioGpu {
             .set_use_external_blob(true)
     }
 
+    #[must_use]
     pub fn new(queue_ctl: &VringRwLock, gpu_mode: GpuMode, gpu_backend: GpuBackend) -> Self {
-        let fence_state = Arc::new(Mutex::new(Default::default()));
+        let fence_state = Arc::new(Mutex::new(FenceState::default()));
         let fence = Self::create_fence_handler(queue_ctl.clone(), fence_state.clone());
         let rutabaga = Self::configure_rutabaga_builder(gpu_mode)
             .build(fence, None)
@@ -407,7 +414,7 @@ impl RutabagaVirtioGpu {
         Self {
             rutabaga,
             gpu_backend,
-            resources: Default::default(),
+            resources: BTreeMap::default(),
             fence_state,
             scanouts: Default::default(),
         }
@@ -439,6 +446,10 @@ impl RutabagaVirtioGpu {
         let minimal_buffer_size = resource.calculate_size()?;
         assert!(output.len() >= minimal_buffer_size);
 
+        let Ok(bytes_per_pixel) = u32::try_from(READ_RESOURCE_BYTES_PER_PIXEL) else {
+            return Err("Size conversion failed".to_string());
+        };
+
         let transfer = Transfer3D {
             x: 0,
             y: 0,
@@ -447,7 +458,7 @@ impl RutabagaVirtioGpu {
             h: resource.height,
             d: 1,
             level: 0,
-            stride: resource.width * READ_RESOURCE_BYTES_PER_PIXEL as u32,
+            stride: resource.width * bytes_per_pixel,
             layer_stride: 0,
             offset: 0,
         };
@@ -463,7 +474,7 @@ impl RutabagaVirtioGpu {
 
 impl VirtioGpu for RutabagaVirtioGpu {
     fn force_ctx_0(&self) {
-        self.rutabaga.force_ctx_0()
+        self.rutabaga.force_ctx_0();
     }
 
     fn display_info(&self) -> VirtioGpuResult {
@@ -653,7 +664,7 @@ impl VirtioGpu for RutabagaVirtioGpu {
                 .map_err(|e| {
                     error!("Failed to update_scanout: {e:?}");
                     ErrUnspec
-                })?
+                })?;
         }
 
         Ok(OkNoData)
@@ -696,7 +707,7 @@ impl VirtioGpu for RutabagaVirtioGpu {
         mem: &GuestMemoryMmap,
         vecs: Vec<(GuestAddress, usize)>,
     ) -> VirtioGpuResult {
-        let rutabaga_iovecs = sglist_to_rutabaga_iovecs(&vecs[..], mem).map_err(|_| ErrUnspec)?;
+        let rutabaga_iovecs = sglist_to_rutabaga_iovecs(&vecs[..], mem).map_err(|()| ErrUnspec)?;
         self.rutabaga.attach_backing(resource_id, rutabaga_iovecs)?;
         Ok(OkNoData)
     }
@@ -884,7 +895,7 @@ impl VirtioGpu for RutabagaVirtioGpu {
     }
 
     fn event_poll(&self) {
-        self.rutabaga.event_poll()
+        self.rutabaga.event_poll();
     }
 }
 

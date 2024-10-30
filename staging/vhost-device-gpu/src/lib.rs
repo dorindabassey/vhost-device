@@ -28,6 +28,8 @@
     clippy::naive_bytecount
 )]
 #![allow(
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
     clippy::significant_drop_in_scrutinee,
     clippy::significant_drop_tightening
 )]
@@ -50,8 +52,8 @@ pub enum GpuMode {
 }
 
 #[derive(Debug, Clone)]
-/// This structure is the public API through which an external program
-/// is allowed to configure the backend.
+/// This structure holds the internal configuration for the GPU backend,
+/// derived from the command-line arguments provided through `GpuArgs`.
 pub struct GpuConfig {
     /// vhost-user Unix domain socket
     socket_path: PathBuf,
@@ -59,8 +61,9 @@ pub struct GpuConfig {
 }
 
 impl GpuConfig {
-    /// Create a new instance of the GpuConfig struct, containing the
+    /// Create a new instance of the `GpuConfig` struct, containing the
     /// parameters to be fed into the gpu-backend server.
+    #[must_use]
     pub const fn new(socket_path: PathBuf, gpu_mode: GpuMode) -> Self {
         Self {
             socket_path,
@@ -70,10 +73,12 @@ impl GpuConfig {
 
     /// Return the path of the unix domain socket which is listening to
     /// requests from the guest.
+    #[must_use]
     pub fn socket_path(&self) -> PathBuf {
-        self.socket_path.to_path_buf()
+        self.socket_path.clone()
     }
 
+    #[must_use]
     pub const fn gpu_mode(&self) -> GpuMode {
         self.gpu_mode
     }
@@ -87,7 +92,7 @@ mod tests {
 
     #[test]
     fn test_gpu_config() {
-        // Test the creation of GpuConfig struct
+        // Test the creation of `GpuConfig` struct
         let test_dir = tempdir().expect("Could not create a temp test directory.");
         let socket_path = test_dir.path().join("socket");
         let gpu_config = GpuConfig::new(socket_path.clone(), GpuMode::VirglRenderer);

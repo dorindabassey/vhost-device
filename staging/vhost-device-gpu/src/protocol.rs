@@ -411,9 +411,10 @@ impl Default for virtio_gpu_ctx_create {
 }
 
 impl virtio_gpu_ctx_create {
+    #[must_use]
     pub fn get_debug_name(&self) -> String {
         CStr::from_bytes_with_nul(&self.debug_name[..min(64, self.nlen as usize)]).map_or_else(
-            |err| format!("Err({})", err),
+            |err| format!("Err({err})"),
             |c_str| c_str.to_string_lossy().into_owned(),
         )
     }
@@ -755,6 +756,7 @@ impl fmt::Debug for GpuCommand {
 }
 
 impl GpuCommand {
+    #[must_use]
     pub fn get_type_name(&self) -> &'static str {
         std::any::type_name::<Self>()
     }
@@ -797,7 +799,7 @@ impl GpuCommand {
                 for _ in 0..info.nr_entries {
                     let entry: virtio_gpu_mem_entry =
                         reader.read_obj().map_err(|_| Error::DescriptorReadFailed)?;
-                    entries.push((GuestAddress(entry.addr), entry.length as usize))
+                    entries.push((GuestAddress(entry.addr), entry.length as usize));
                 }
                 ResourceAttachBacking(info, entries)
             }
@@ -930,10 +932,10 @@ impl From<RutabagaError> for GpuResponse {
 
 impl Display for GpuResponse {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::GpuResponse::*;
+        use self::GpuResponse::{ErrRutabaga, ErrScanout};
         match self {
-            ErrRutabaga(e) => write!(f, "renderer error: {}", e),
-            ErrScanout { num_scanouts } => write!(f, "non-zero scanout: {}", num_scanouts),
+            ErrRutabaga(e) => write!(f, "renderer error: {e}"),
+            ErrScanout { num_scanouts } => write!(f, "non-zero scanout: {num_scanouts}"),
             _ => Ok(()),
         }
     }
@@ -945,6 +947,9 @@ pub enum GpuResponseEncodeError {
     /// An I/O error occurred.
     #[error("an I/O error occurred: {0}")]
     IO(io::Error),
+    /// Size conversion failed
+    #[error("Size conversion failed")]
+    SizeOverflow,
     /// More displays than are valid were in a `OkDisplayInfo`.
     #[error("{0} is more displays than are valid")]
     TooManyDisplays(usize),
@@ -1002,9 +1007,12 @@ impl GpuResponse {
                 size_of_val(&disp_info)
             }
             Self::OkEdid { ref blob } => {
+                let Ok(size) = u32::try_from(blob.len()) else {
+                    return Err(GpuResponseEncodeError::SizeOverflow);
+                };
                 let mut edid_info = virtio_gpu_resp_edid {
                     hdr,
-                    size: blob.len() as u32,
+                    size,
                     edid: [0; EDID_BLOB_MAX_SIZE],
                     padding: Default::default(),
                 };
@@ -1052,9 +1060,12 @@ impl GpuResponse {
                     strides[plane_index] = plane.stride;
                     offsets[plane_index] = plane.offset;
                 }
+                let Ok(count) = u32::try_from(plane_info.len()) else {
+                    return Err(GpuResponseEncodeError::SizeOverflow);
+                };
                 let plane_info = virtio_gpu_resp_resource_plane_info {
                     hdr,
-                    count: plane_info.len() as u32,
+                    count,
                     padding: 0u32,
                     format_modifier,
                     strides,
@@ -1102,10 +1113,13 @@ impl GpuResponse {
                 size_of_val(&hdr)
             }
         };
-        Ok(len as u32)
+        let len = u32::try_from(len).map_err(|_| GpuResponseEncodeError::SizeOverflow)?;
+
+        Ok(len)
     }
 
     /// Gets the `VIRTIO_GPU_*` enum value that corresponds to this variant.
+    #[must_use]
     pub const fn get_type(&self) -> u32 {
         match self {
             Self::OkNoData => VIRTIO_GPU_RESP_OK_NODATA,
@@ -1116,9 +1130,9 @@ impl GpuResponse {
             Self::OkResourcePlaneInfo { .. } => VIRTIO_GPU_RESP_OK_RESOURCE_PLANE_INFO,
             Self::OkResourceUuid { .. } => VIRTIO_GPU_RESP_OK_RESOURCE_UUID,
             Self::OkMapInfo { .. } => VIRTIO_GPU_RESP_OK_MAP_INFO,
-            Self::ErrUnspec => VIRTIO_GPU_RESP_ERR_UNSPEC,
-            Self::ErrRutabaga(_) => VIRTIO_GPU_RESP_ERR_UNSPEC,
-            Self::ErrScanout { .. } => VIRTIO_GPU_RESP_ERR_UNSPEC,
+            Self::ErrUnspec | Self::ErrRutabaga(_) | Self::ErrScanout { .. } => {
+                VIRTIO_GPU_RESP_ERR_UNSPEC
+            }
             Self::ErrOutOfMemory => VIRTIO_GPU_RESP_ERR_OUT_OF_MEMORY,
             Self::ErrInvalidScanoutId => VIRTIO_GPU_RESP_ERR_INVALID_SCANOUT_ID,
             Self::ErrInvalidResourceId => VIRTIO_GPU_RESP_ERR_INVALID_RESOURCE_ID,
