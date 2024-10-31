@@ -581,8 +581,7 @@ impl VirtioGpu for RutabagaVirtioGpu {
 
         debug_assert!(
             !self.resources.contains_key(&resource_id),
-            "Resource ID {} already exists in the resources map.",
-            resource_id
+            "Resource ID {resource_id} already exists in the resources map."
         );
 
         // Rely on rutabaga to check for duplicate resource ids.
