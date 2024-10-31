@@ -118,7 +118,7 @@ impl VhostUserGpuBackend {
             virtio_cfg: VirtioGpuConfig {
                 events_read: 0.into(),
                 events_clear: 0.into(),
-                num_scanouts: Le32::from(u32::try_from(VIRTIO_GPU_MAX_SCANOUTS).unwrap()),
+                num_scanouts: Le32::from(VIRTIO_GPU_MAX_SCANOUTS),
                 num_capsets: RutabagaVirtioGpu::MAX_NUMBER_OF_CAPSETS.into(),
             },
             event_idx_enabled: false,
@@ -704,7 +704,8 @@ mod tests {
     use super::*;
     use crate::{
         protocol::{
-            virtio_gpu_mem_entry,
+            virtio_gpu_mem_entry, virtio_gpu_rect, virtio_gpu_resource_attach_backing,
+            virtio_gpu_resource_flush, virtio_gpu_set_scanout,
             GpuResponse::{OkCapsetInfo, OkDisplayInfo, OkEdid, OkNoData},
             VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING, VIRTIO_GPU_CMD_RESOURCE_CREATE_2D,
             VIRTIO_GPU_CMD_RESOURCE_FLUSH, VIRTIO_GPU_CMD_SET_SCANOUT,

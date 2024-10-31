@@ -41,7 +41,7 @@ pub mod protocol;
 #[cfg(target_env = "gnu")]
 pub mod virtio_gpu;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::ValueEnum;
 
@@ -74,8 +74,8 @@ impl GpuConfig {
     /// Return the path of the unix domain socket which is listening to
     /// requests from the guest.
     #[must_use]
-    pub fn socket_path(&self) -> PathBuf {
-        self.socket_path.clone()
+    pub fn socket_path(&self) -> &Path {
+        &self.socket_path
     }
 
     #[must_use]

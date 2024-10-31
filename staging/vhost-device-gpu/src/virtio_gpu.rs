@@ -275,9 +275,7 @@ impl AssociatedScanouts {
     }
 
     fn iter_enabled(self) -> impl Iterator<Item = u32> {
-        (0..VIRTIO_GPU_MAX_SCANOUTS)
-            .filter(move |i| ((self.0 >> i) & 1) == 1)
-            .map(|n| n as u32)
+        (0..VIRTIO_GPU_MAX_SCANOUTS).filter(move |i| ((self.0 >> i) & 1) == 1)
     }
 }
 
@@ -299,7 +297,7 @@ impl VirtioGpuResource {
         let size = width
             .checked_mul(height)
             .ok_or("Multiplication of width and height overflowed")?
-            .checked_mul(READ_RESOURCE_BYTES_PER_PIXEL)
+            .checked_mul(READ_RESOURCE_BYTES_PER_PIXEL as usize)
             .ok_or("Multiplication of result and bytes_per_pixel overflowed")?;
 
         Ok(size)
@@ -328,10 +326,10 @@ pub struct RutabagaVirtioGpu {
     pub(crate) gpu_backend: GpuBackend,
     pub(crate) resources: BTreeMap<u32, VirtioGpuResource>,
     pub(crate) fence_state: Arc<Mutex<FenceState>>,
-    pub(crate) scanouts: [Option<VirtioGpuScanout>; VIRTIO_GPU_MAX_SCANOUTS],
+    pub(crate) scanouts: [Option<VirtioGpuScanout>; VIRTIO_GPU_MAX_SCANOUTS as usize],
 }
 
-const READ_RESOURCE_BYTES_PER_PIXEL: usize = 4;
+const READ_RESOURCE_BYTES_PER_PIXEL: u32 = 4;
 
 impl RutabagaVirtioGpu {
     // TODO: this depends on Rutabaga builder, so this will need to be handled at
@@ -446,10 +444,6 @@ impl RutabagaVirtioGpu {
         let minimal_buffer_size = resource.calculate_size()?;
         assert!(output.len() >= minimal_buffer_size);
 
-        let Ok(bytes_per_pixel) = u32::try_from(READ_RESOURCE_BYTES_PER_PIXEL) else {
-            return Err("Size conversion failed".to_string());
-        };
-
         let transfer = Transfer3D {
             x: 0,
             y: 0,
@@ -458,7 +452,7 @@ impl RutabagaVirtioGpu {
             h: resource.height,
             d: 1,
             level: 0,
-            stride: resource.width * bytes_per_pixel,
+            stride: resource.width * READ_RESOURCE_BYTES_PER_PIXEL,
             layer_stride: 0,
             offset: 0,
         };
@@ -587,8 +581,7 @@ impl VirtioGpu for RutabagaVirtioGpu {
 
         debug_assert!(
             !self.resources.contains_key(&resource_id),
-            "Resource ID {} already exists in the resources map.",
-            resource_id
+            "Resource ID {resource_id} already exists in the resources map."
         );
 
         // Rely on rutabaga to check for duplicate resource ids.
@@ -728,7 +721,9 @@ impl VirtioGpu for RutabagaVirtioGpu {
         const CURSOR_HEIGHT: u32 = 64;
 
         let mut data = Box::new(
-            [0; READ_RESOURCE_BYTES_PER_PIXEL * CURSOR_WIDTH as usize * CURSOR_HEIGHT as usize],
+            [0; READ_RESOURCE_BYTES_PER_PIXEL as usize
+                * CURSOR_WIDTH as usize
+                * CURSOR_HEIGHT as usize],
         );
 
         let cursor_resource = self
