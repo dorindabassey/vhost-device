@@ -70,9 +70,9 @@ pub const NUM_QUEUES: usize = 2;
 
 pub const CONTROL_QUEUE: u16 = 0;
 pub const CURSOR_QUEUE: u16 = 1;
-pub const POLL_EVENT: u16 = NUM_QUEUES as u16 + 1;
+pub const POLL_EVENT: u16 = 3;
 
-pub const VIRTIO_GPU_MAX_SCANOUTS: usize = 16;
+pub const VIRTIO_GPU_MAX_SCANOUTS: u32 = 16;
 
 /// `CHROMIUM(b/277982577)` success responses
 pub const VIRTIO_GPU_RESP_OK_RESOURCE_PLANE_INFO: u32 = 0x11FF;
@@ -308,7 +308,7 @@ unsafe impl ByteValued for virtio_gpu_display_one {}
 #[repr(C)]
 pub struct virtio_gpu_resp_display_info {
     pub hdr: virtio_gpu_ctrl_hdr,
-    pub pmodes: [virtio_gpu_display_one; VIRTIO_GPU_MAX_SCANOUTS],
+    pub pmodes: [virtio_gpu_display_one; VIRTIO_GPU_MAX_SCANOUTS as usize],
 }
 
 // SAFETY: The layout of the structure is fixed and can be initialized by
@@ -988,7 +988,7 @@ impl GpuResponse {
         };
         let len = match *self {
             Self::OkDisplayInfo(ref info) => {
-                if info.len() > VIRTIO_GPU_MAX_SCANOUTS {
+                if info.len() > VIRTIO_GPU_MAX_SCANOUTS as usize {
                     return Err(GpuResponseEncodeError::TooManyDisplays(info.len()));
                 }
                 let mut disp_info = virtio_gpu_resp_display_info {
