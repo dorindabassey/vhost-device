@@ -17,12 +17,14 @@ use rutabaga_gfx::{
     ResourceCreate3D, ResourceCreateBlob, Rutabaga, RutabagaBuilder, RutabagaComponentType,
     RutabagaFence, RutabagaFenceHandler, RutabagaIntoRawDescriptor, RutabagaIovec, Transfer3D,
 };
+use uuid::Uuid;
+use vhost::vhost_user::message::VhostUserSharedMsg;
 use vhost::vhost_user::{
     gpu_message::{
         VhostUserGpuCursorPos, VhostUserGpuCursorUpdate, VhostUserGpuEdidRequest,
         VhostUserGpuScanout, VhostUserGpuUpdate,
     },
-    Backend, GpuBackend,
+    Backend, GpuBackend, VhostUserFrontendReqHandler,
 };
 use vhost_user_backend::{VringRwLock, VringT};
 use vm_memory::{GuestAddress, GuestMemory, GuestMemoryMmap, VolatileSlice};
@@ -206,7 +208,7 @@ pub trait VirtioGpu {
     fn move_cursor(&mut self, resource_id: u32, cursor: VhostUserGpuCursorPos) -> VirtioGpuResult;
 
     /// Returns a uuid for the resource.
-    fn resource_assign_uuid(&self, resource_id: u32) -> VirtioGpuResult;
+    fn resource_assign_uuid(&mut self, resource_id: u32) -> VirtioGpuResult;
 
     /// Gets rutabaga's capset information associated with `index`.
     fn get_capset_info(&self, index: u32) -> VirtioGpuResult;
@@ -314,6 +316,7 @@ pub struct RutabagaVirtioGpu {
     pub(crate) resources: BTreeMap<u32, VirtioGpuResource>,
     pub(crate) fence_state: Arc<Mutex<FenceState>>,
     pub(crate) scanouts: [Option<VirtioGpuScanout>; VIRTIO_GPU_MAX_SCANOUTS],
+    pub(crate) shared_resources: BTreeMap<u32, VhostUserSharedMsg>,
 }
 
 const READ_RESOURCE_BYTES_PER_PIXEL: usize = 4;
@@ -404,6 +407,7 @@ impl RutabagaVirtioGpu {
             resources: Default::default(),
             fence_state,
             scanouts: Default::default(),
+            shared_resources: Default::default(),
         }
     }
 
@@ -743,18 +747,36 @@ impl VirtioGpu for RutabagaVirtioGpu {
         Ok(OkNoData)
     }
 
-    fn resource_assign_uuid(&self, resource_id: u32) -> VirtioGpuResult {
+    fn resource_assign_uuid(&mut self, resource_id: u32) -> VirtioGpuResult {
         if !self.resources.contains_key(&resource_id) {
             return Err(ErrInvalidResourceId);
         }
 
-        // TODO(stevensd): use real uuids once the virtio wayland protocol is updated to
-        // handle more than 32 bits. For now, the virtwl driver knows that the uuid is
-        // actually just the resource id.
-        let mut uuid: [u8; 16] = [0; 16];
-        for (idx, byte) in resource_id.to_be_bytes().iter().enumerate() {
-            uuid[12 + idx] = *byte;
+        // If the resource is already assigned a UUID, return it directly
+        if let Some(existing_resource) = self.shared_resources.get(&resource_id) {
+            return Ok(OkResourceUuid {
+                uuid: existing_resource.uuid.into_bytes(),
+            });
         }
+
+        let shared_msg = VhostUserSharedMsg {
+            uuid: Uuid::new_v4(),
+        };
+
+        println!("shared_obj_add");
+        self.backend.shared_object_add(&shared_msg).map_err(|e| {
+            error!(
+                "Failed to send vhost-user shared-object add request to the frontend: {}",
+                e
+            );
+            ErrUnspec
+        })?;
+
+        self.shared_resources
+            .entry(resource_id)
+            .or_insert(shared_msg);
+        let uuid = shared_msg.uuid.into_bytes();
+
         Ok(OkResourceUuid { uuid })
     }
 
@@ -908,6 +930,7 @@ mod tests {
             resources: Default::default(),
             fence_state: Arc::new(Mutex::new(Default::default())),
             scanouts: Default::default(),
+            shared_resources: Default::default(),
         }
     }
 

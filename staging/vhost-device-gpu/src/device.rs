@@ -8,14 +8,14 @@ use crate::{
     protocol::{
         virtio_gpu_box, virtio_gpu_ctrl_hdr, virtio_gpu_ctx_create, virtio_gpu_ctx_resource,
         virtio_gpu_cursor_pos, virtio_gpu_get_capset, virtio_gpu_get_capset_info,
-        virtio_gpu_get_edid, virtio_gpu_rect, virtio_gpu_resource_attach_backing,
-        virtio_gpu_resource_create_2d, virtio_gpu_resource_create_3d,
-        virtio_gpu_resource_detach_backing, virtio_gpu_resource_flush, virtio_gpu_resource_unref,
-        virtio_gpu_set_scanout, virtio_gpu_transfer_host_3d, virtio_gpu_transfer_to_host_2d,
-        virtio_gpu_update_cursor, GpuCommand, GpuCommandDecodeError, GpuResponse::ErrUnspec,
-        GpuResponseEncodeError, VirtioGpuConfig, VirtioGpuResult, CONTROL_QUEUE, CURSOR_QUEUE,
-        NUM_QUEUES, POLL_EVENT, QUEUE_SIZE, VIRTIO_GPU_FLAG_FENCE, VIRTIO_GPU_FLAG_INFO_RING_IDX,
-        VIRTIO_GPU_MAX_SCANOUTS,
+        virtio_gpu_get_edid, virtio_gpu_rect, virtio_gpu_resource_assign_uuid,
+        virtio_gpu_resource_attach_backing, virtio_gpu_resource_create_2d,
+        virtio_gpu_resource_create_3d, virtio_gpu_resource_detach_backing,
+        virtio_gpu_resource_flush, virtio_gpu_resource_unref, virtio_gpu_set_scanout,
+        virtio_gpu_transfer_host_3d, virtio_gpu_transfer_to_host_2d, virtio_gpu_update_cursor,
+        GpuCommand, GpuCommandDecodeError, GpuResponse::ErrUnspec, GpuResponseEncodeError,
+        VirtioGpuConfig, VirtioGpuResult, CONTROL_QUEUE, CURSOR_QUEUE, NUM_QUEUES, POLL_EVENT,
+        QUEUE_SIZE, VIRTIO_GPU_FLAG_FENCE, VIRTIO_GPU_FLAG_INFO_RING_IDX, VIRTIO_GPU_MAX_SCANOUTS,
     },
     virtio_gpu::{RutabagaVirtioGpu, VirtioGpu, VirtioGpuRing},
     GpuConfig, GpuMode,
@@ -46,7 +46,7 @@ use virtio_bindings::{
     },
     virtio_gpu::{
         VIRTIO_GPU_F_CONTEXT_INIT, VIRTIO_GPU_F_EDID, VIRTIO_GPU_F_RESOURCE_BLOB,
-        VIRTIO_GPU_F_VIRGL,
+        VIRTIO_GPU_F_RESOURCE_UUID, VIRTIO_GPU_F_VIRGL,
     },
 };
 use virtio_queue::{QueueOwnedT, Reader, Writer};
@@ -248,9 +248,9 @@ impl VhostUserGpuBackendInner {
                 let cursor = VhostUserGpuCursorPos { scanout_id, x, y };
                 virtio_gpu.move_cursor(resource_id, cursor)
             }
-            GpuCommand::ResourceAssignUuid(_info) => {
-                panic!("virtio_gpu: GpuCommand::ResourceAssignUuid unimplemented");
-            }
+            GpuCommand::ResourceAssignUuid(virtio_gpu_resource_assign_uuid {
+                resource_id, ..
+            }) => virtio_gpu.resource_assign_uuid(resource_id),
             GpuCommand::GetCapsetInfo(virtio_gpu_get_capset_info { capset_index, .. }) => {
                 virtio_gpu.get_capset_info(capset_index)
             }
@@ -642,6 +642,7 @@ impl VhostUserBackend for VhostUserGpuBackend {
             | 1 << VIRTIO_RING_F_EVENT_IDX
             | 1 << VIRTIO_GPU_F_VIRGL
             | 1 << VIRTIO_GPU_F_EDID
+            | 1 << VIRTIO_GPU_F_RESOURCE_UUID
             | 1 << VIRTIO_GPU_F_RESOURCE_BLOB
             | 1 << VIRTIO_GPU_F_CONTEXT_INIT
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
@@ -654,6 +655,7 @@ impl VhostUserBackend for VhostUserGpuBackend {
             | VhostUserProtocolFeatures::BACKEND_REQ
             | VhostUserProtocolFeatures::BACKEND_SEND_FD
             | VhostUserProtocolFeatures::REPLY_ACK
+            | VhostUserProtocolFeatures::SHARED_OBJECT
     }
 
     fn set_event_idx(&self, enabled: bool) {
@@ -667,8 +669,9 @@ impl VhostUserBackend for VhostUserGpuBackend {
         Ok(())
     }
 
-    fn set_gpu_socket(&self, backend: GpuBackend) {
+    fn set_gpu_socket(&self, backend: GpuBackend) -> IoResult<()> {
         self.inner.lock().unwrap().gpu_backend = Some(backend);
+        Ok(())
     }
 
     fn set_backend_req_fd(&self, backend: Backend) {
@@ -1363,7 +1366,7 @@ mod tests {
 
         assert_eq!(backend.num_queues(), NUM_QUEUES);
         assert_eq!(backend.max_queue_size(), QUEUE_SIZE);
-        assert_eq!(backend.features(), 0x1017100001B);
+        assert_eq!(backend.features(), 0x1017100001F);
         assert_eq!(
             backend.protocol_features(),
             VhostUserProtocolFeatures::CONFIG
@@ -1371,6 +1374,7 @@ mod tests {
                 | VhostUserProtocolFeatures::BACKEND_REQ
                 | VhostUserProtocolFeatures::BACKEND_SEND_FD
                 | VhostUserProtocolFeatures::REPLY_ACK
+                | VhostUserProtocolFeatures::SHARED_OBJECT
         );
         assert_eq!(backend.queues_per_thread(), vec![0xffff_ffff]);
         assert_eq!(backend.get_config(0, 0), vec![]);
