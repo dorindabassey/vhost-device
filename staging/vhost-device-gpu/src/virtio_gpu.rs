@@ -582,6 +582,18 @@ impl VirtioGpu for RutabagaVirtioGpu {
     }
 
     fn unref_resource(&mut self, resource_id: u32) -> VirtioGpuResult {
+        // Retrieve UUID associated with the given resource_id
+        if let Some(uuid) = self.shared_resources.remove(&resource_id) {
+            self.backend.shared_object_remove(&uuid).map_err(|e| {
+                error!(
+                    "Failed to send vhost-user shared-object remove request to the frontend: {}",
+                    e
+                );
+                ErrUnspec
+            })?;
+            println!("shared_obj_remove");
+        }
+
         self.rutabaga.unref_resource(resource_id)?;
         Ok(OkNoData)
     }
