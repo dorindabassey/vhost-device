@@ -415,6 +415,7 @@ impl RutabagaVirtioGpu {
             .set_use_glx(gpu_config.flags().use_glx)
             .set_use_gles(gpu_config.flags().use_gles)
             .set_use_surfaceless(gpu_config.flags().use_surfaceless)
+            .set_use_render_server(gpu_config.requires_render_server())
             // Since vhost-user-gpu is out-of-process this is the only type of blob resource that
             // could work, so this is always enabled
             .set_use_external_blob(true)

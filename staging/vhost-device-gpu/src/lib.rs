@@ -58,7 +58,7 @@ mod gnu_only {
     use log::info;
     #[cfg(feature = "gfxstream")]
     use rutabaga_gfx::{RUTABAGA_CAPSET_GFXSTREAM_GLES, RUTABAGA_CAPSET_GFXSTREAM_VULKAN};
-    use rutabaga_gfx::{RUTABAGA_CAPSET_VIRGL, RUTABAGA_CAPSET_VIRGL2};
+    use rutabaga_gfx::{RUTABAGA_CAPSET_VENUS, RUTABAGA_CAPSET_VIRGL, RUTABAGA_CAPSET_VIRGL2};
     use thiserror::Error as ThisError;
     use vhost_user_backend::VhostUserDaemon;
     use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
@@ -89,7 +89,8 @@ mod gnu_only {
         pub struct GpuCapset: u64 {
             const VIRGL = 1 << RUTABAGA_CAPSET_VIRGL as u64;
             const VIRGL2 = 1 << RUTABAGA_CAPSET_VIRGL2 as u64;
-            const ALL_VIRGLRENDERER_CAPSETS = Self::VIRGL.bits() | Self::VIRGL2.bits();
+            const VENUS = 1 << RUTABAGA_CAPSET_VENUS as u64;
+            const ALL_VIRGLRENDERER_CAPSETS = Self::VIRGL.bits() | Self::VIRGL2.bits() | Self::VENUS.bits();
 
             #[cfg(feature = "gfxstream")]
             const GFXSTREAM_VULKAN = 1 << RUTABAGA_CAPSET_GFXSTREAM_VULKAN as u64;
@@ -112,6 +113,7 @@ mod gnu_only {
                 match capset {
                     Self::VIRGL => write!(f, "virgl"),
                     Self::VIRGL2 => write!(f, "virgl2"),
+                    Self::VENUS => write!(f, "venus"),
                     #[cfg(feature = "gfxstream")]
                     Self::GFXSTREAM_VULKAN => write!(f, "gfxstream-vulkan"),
                     #[cfg(feature = "gfxstream")]
@@ -174,8 +176,9 @@ mod gnu_only {
     }
 
     impl GpuConfig {
-        pub const DEFAULT_VIRGLRENDER_CAPSET_MASK: GpuCapset =
-            GpuCapset::VIRGL.union(GpuCapset::VIRGL2);
+        pub const DEFAULT_VIRGLRENDER_CAPSET_MASK: GpuCapset = GpuCapset::VIRGL
+            .union(GpuCapset::VIRGL2)
+            .union(GpuCapset::VENUS);
 
         #[cfg(feature = "gfxstream")]
         pub const DEFAULT_GFXSTREAM_CAPSET_MASK: GpuCapset =
@@ -236,6 +239,10 @@ mod gnu_only {
 
         pub const fn flags(&self) -> &GpuFlags {
             &self.flags
+        }
+
+        pub fn requires_render_server(&self) -> bool {
+            self.gpu_mode == GpuMode::VirglRenderer && self.capset.contains(GpuCapset::VENUS)
         }
     }
 
@@ -313,7 +320,7 @@ mod tests {
     fn test_gpu_config_valid_combination() {
         let config = GpuConfig::new(
             GpuMode::VirglRenderer,
-            Some(GpuCapset::VIRGL2),
+            Some(GpuCapset::VENUS),
             GpuFlags::default(),
         )
         .unwrap();
@@ -350,7 +357,7 @@ mod tests {
 
     #[test]
     fn test_default_num_capsets() {
-        assert_eq!(GpuConfig::DEFAULT_VIRGLRENDER_CAPSET_MASK.num_capsets(), 2);
+        assert_eq!(GpuConfig::DEFAULT_VIRGLRENDER_CAPSET_MASK.num_capsets(), 3);
         #[cfg(feature = "gfxstream")]
         assert_eq!(GpuConfig::DEFAULT_GFXSTREAM_CAPSET_MASK.num_capsets(), 2);
     }
