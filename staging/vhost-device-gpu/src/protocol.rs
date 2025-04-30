@@ -479,12 +479,6 @@ pub struct virtio_gpu_cmd_submit {
 // reading its content from byte array.
 unsafe impl ByteValued for virtio_gpu_cmd_submit {}
 
-pub const VIRTIO_GPU_CAPSET_VIRGL: u32 = 1;
-pub const VIRTIO_GPU_CAPSET_VIRGL2: u32 = 2;
-pub const VIRTIO_GPU_CAPSET_GFXSTREAM: u32 = 3;
-pub const VIRTIO_GPU_CAPSET_VENUS: u32 = 4;
-pub const VIRTIO_GPU_CAPSET_CROSS_DOMAIN: u32 = 5;
-
 // VIRTIO_GPU_CMD_GET_CAPSET_INFO
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
@@ -1171,25 +1165,25 @@ mod tests {
     #[test]
     fn test_invalid_command_type_display() {
         let error = InvalidCommandType(42);
-        assert_eq!(format!("{}", error), "Invalid command type 42");
+        assert_eq!(format!("{error}"), "Invalid command type 42");
     }
 
     #[test]
     fn test_gpu_response_display() {
         let err_rutabaga = GpuResponse::ErrRutabaga(RutabagaError::InvalidContextId);
         assert_eq!(
-            format!("{}", err_rutabaga),
+            format!("{err_rutabaga}"),
             "renderer error: invalid context id"
         );
 
         let err_scanout = GpuResponse::ErrScanout { num_scanouts: 3 };
-        assert_eq!(format!("{}", err_scanout), "non-zero scanout: 3");
+        assert_eq!(format!("{err_scanout}"), "non-zero scanout: 3");
     }
 
     #[test]
     fn test_invalid_type_error() {
         let error = GpuCommandDecodeError::InvalidType(42);
-        assert_eq!(format!("{}", error), "invalid command type (42)");
+        assert_eq!(format!("{error}"), "invalid command type (42)");
     }
 
     // Test io_error conversion to gpu command decode error
@@ -1313,7 +1307,7 @@ mod tests {
         ];
 
         for (command, expected) in test_cases {
-            assert_eq!(format!("{:?}", command), expected);
+            assert_eq!(format!("{command:?}"), expected);
         }
     }
 
@@ -1330,7 +1324,7 @@ mod tests {
             nlen: (bytes.len() as u32).into(),
         };
 
-        let debug_string = format!("{:?}", original);
+        let debug_string = format!("{original:?}");
         assert_eq!(
             debug_string,
             "virtio_gpu_ctx_create { debug_name: \"test_debug\", context_init: Le32(0), .. }"

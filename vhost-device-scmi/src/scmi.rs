@@ -468,11 +468,7 @@ impl HandlerMap {
                 let max_sensors_to_return = 256;
                 let sensors_to_return = min(n_sensors - first_index, max_sensors_to_return);
                 let last_non_returned_sensor = first_index + sensors_to_return;
-                let remaining_sensors = if n_sensors > last_non_returned_sensor {
-                    n_sensors - last_non_returned_sensor
-                } else {
-                    0
-                };
+                let remaining_sensors = n_sensors.saturating_sub(last_non_returned_sensor);
                 let mut values = vec![MessageValue::Unsigned(
                     sensors_to_return as u32 | (remaining_sensors as u32) << 16,
                 )];
@@ -1381,17 +1377,24 @@ mod tests {
             MessageValue::Unsigned(0),
             MessageValue::Unsigned(axis_index),
         ];
-        let mut result = vec![MessageValue::Unsigned(n_axes - axis_index)];
-        for i in axis_index..n_axes {
-            let name = format!("acc_{}", char::from_u32('X' as u32 + i).unwrap()).to_string();
-            let mut description = vec![
-                MessageValue::Unsigned(i),
-                MessageValue::Unsigned(0),
-                MessageValue::Unsigned(u32::from(SENSOR_UNIT_METERS_PER_SECOND_SQUARED)),
-                MessageValue::String(name, MAX_SIMPLE_STRING_LENGTH),
-            ];
-            result.append(&mut description);
-        }
+        // Each call will return only one descriptor to avoid exceeding the maximum length of the message
+        // and to inform about the number of the remaining sensor axis descriptions.
+        let num_axis_flags = 1 | (n_axes - axis_index - 1) << 26;
+        let mut result = vec![MessageValue::Unsigned(num_axis_flags)];
+        let name = format!("acc_{}", char::from_u32('X' as u32 + axis_index).unwrap()).to_string();
+        let mut description = vec![
+            MessageValue::Unsigned(axis_index),
+            MessageValue::Unsigned(1 << 8),
+            MessageValue::Unsigned(u32::from(SENSOR_UNIT_METERS_PER_SECOND_SQUARED)),
+            MessageValue::String(name, MAX_SIMPLE_STRING_LENGTH),
+            // Add extended attributes
+            MessageValue::Unsigned(0),
+            MessageValue::Signed(0),
+            MessageValue::Signed(i32::MIN),
+            MessageValue::Signed(-1i32),
+            MessageValue::Signed(i32::MAX),
+        ];
+        result.append(&mut description);
         test_message(
             SENSOR_PROTOCOL_ID,
             SENSOR_AXIS_DESCRIPTION_GET,

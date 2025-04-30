@@ -39,7 +39,7 @@ use crate::{
         GpuResponsePlaneInfo, VirtioGpuResult, VIRTIO_GPU_FLAG_INFO_RING_IDX,
         VIRTIO_GPU_MAX_SCANOUTS,
     },
-    GpuMode,
+    GpuConfig, GpuMode,
 };
 
 fn sglist_to_rutabaga_iovecs(
@@ -239,7 +239,7 @@ pub trait VirtioGpu {
     fn event_poll(&self);
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum VirtioGpuRing {
     Global,
     ContextSpecific { ctx_id: u32, ring_idx: u8 },
@@ -331,10 +331,6 @@ pub struct RutabagaVirtioGpu {
 const READ_RESOURCE_BYTES_PER_PIXEL: u32 = 4;
 
 impl RutabagaVirtioGpu {
-    // TODO: this depends on Rutabaga builder, so this will need to be handled at
-    // runtime eventually
-    pub const MAX_NUMBER_OF_CAPSETS: u32 = 3;
-
     fn create_fence_handler(
         queue_ctl: VringRwLock,
         fence_state: Arc<Mutex<FenceState>>,
@@ -387,23 +383,27 @@ impl RutabagaVirtioGpu {
         })
     }
 
-    fn configure_rutabaga_builder(gpu_mode: GpuMode) -> RutabagaBuilder {
-        let component = match gpu_mode {
+    fn configure_rutabaga_builder(gpu_config: &GpuConfig) -> RutabagaBuilder {
+        let component = match gpu_config.gpu_mode() {
             GpuMode::VirglRenderer => RutabagaComponentType::VirglRenderer,
+            #[cfg(feature = "gfxstream")]
             GpuMode::Gfxstream => RutabagaComponentType::Gfxstream,
         };
-        RutabagaBuilder::new(component, 0)
-            .set_use_egl(true)
-            .set_use_gles(true)
-            .set_use_glx(true)
-            .set_use_surfaceless(true)
+
+        RutabagaBuilder::new(component, gpu_config.capsets().bits())
+            .set_use_egl(gpu_config.flags().use_egl)
+            .set_use_glx(gpu_config.flags().use_glx)
+            .set_use_gles(gpu_config.flags().use_gles)
+            .set_use_surfaceless(gpu_config.flags().use_surfaceless)
+            // Since vhost-user-gpu is out-of-process this is the only type of blob resource that
+            // could work, so this is always enabled
             .set_use_external_blob(true)
     }
 
-    pub fn new(queue_ctl: &VringRwLock, gpu_mode: GpuMode, gpu_backend: GpuBackend) -> Self {
+    pub fn new(queue_ctl: &VringRwLock, gpu_config: &GpuConfig, gpu_backend: GpuBackend) -> Self {
         let fence_state = Arc::new(Mutex::new(FenceState::default()));
         let fence = Self::create_fence_handler(queue_ctl.clone(), fence_state.clone());
-        let rutabaga = Self::configure_rutabaga_builder(gpu_mode)
+        let rutabaga = Self::configure_rutabaga_builder(gpu_config)
             .build(fence, None)
             .expect("Rutabaga initialization failed!");
 
@@ -902,11 +902,11 @@ mod tests {
     use assert_matches::assert_matches;
     use rusty_fork::rusty_fork_test;
     use rutabaga_gfx::{
-        RutabagaHandler, RUTABAGA_PIPE_BIND_RENDER_TARGET, RUTABAGA_PIPE_TEXTURE_2D,
+        RutabagaFence, RutabagaHandler, RUTABAGA_PIPE_BIND_RENDER_TARGET, RUTABAGA_PIPE_TEXTURE_2D,
     };
 
     use super::*;
-    use crate::protocol::VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM;
+    use crate::{protocol::VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM, GpuCapset, GpuFlags};
 
     const CREATE_RESOURCE_2D_720P: ResourceCreate3D = ResourceCreate3D {
         target: RUTABAGA_PIPE_TEXTURE_2D,
@@ -921,19 +921,38 @@ mod tests {
         flags: 0,
     };
 
+    const CREATE_RESOURCE_CURSOR: ResourceCreate3D = ResourceCreate3D {
+        target: RUTABAGA_PIPE_TEXTURE_2D,
+        format: VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM,
+        bind: RUTABAGA_PIPE_BIND_RENDER_TARGET,
+        width: 64,
+        height: 64,
+        depth: 1,
+        array_size: 1,
+        last_level: 0,
+        nr_samples: 0,
+        flags: 0,
+    };
+
     fn dummy_gpu_backend() -> GpuBackend {
         let (_, backend) = UnixStream::pair().unwrap();
         GpuBackend::from_stream(backend)
     }
 
     fn new_gpu() -> RutabagaVirtioGpu {
-        let builder = RutabagaVirtioGpu::configure_rutabaga_builder(GpuMode::VirglRenderer);
+        let config = GpuConfig::new(
+            GpuMode::VirglRenderer,
+            Some(GpuCapset::VIRGL | GpuCapset::VIRGL2),
+            GpuFlags::default(),
+        )
+        .unwrap();
+        let builder = RutabagaVirtioGpu::configure_rutabaga_builder(&config);
         let rutabaga = builder.build(RutabagaHandler::new(|_| {}), None).unwrap();
         RutabagaVirtioGpu {
             rutabaga,
             gpu_backend: dummy_gpu_backend(),
-            resources: Default::default(),
-            fence_state: Arc::new(Mutex::new(Default::default())),
+            resources: BTreeMap::default(),
+            fence_state: Arc::new(Mutex::new(FenceState::default())),
             scanouts: Default::default(),
         }
     }
@@ -996,6 +1015,67 @@ mod tests {
             // The resource exists, but the dimensions are wrong
             let result = virtio_gpu.update_cursor(1, cursor_pos, 0, 0);
             assert_matches!(result, Err(ErrInvalidParameter));
+
+            // Create a resource with correct cursor dimensions
+            let cursor_resource_id = 2;
+            virtio_gpu
+                .resource_create_3d(
+                    cursor_resource_id,
+                    CREATE_RESOURCE_CURSOR).unwrap();
+
+            // The resource exists, the dimensions are correct but the test
+            // fails to update cursor position from frontend
+            let result = virtio_gpu.update_cursor(cursor_resource_id, cursor_pos, 5, 5);
+            assert_matches!(result, Err(ErrUnspec));
+        }
+
+        #[test]
+        fn test_move_cursor_fails() {
+            let mut virtio_gpu = new_gpu();
+            let cursor_pos = VhostUserGpuCursorPos {
+                scanout_id: 1,
+                x: 123,
+                y: 123,
+            };
+
+            // No resources exists, but the test fails to set cursor position from frontend
+            let result = virtio_gpu.move_cursor(0, cursor_pos);
+            assert_matches!(result, Err(ErrUnspec));
+
+            // Resources exists, but the test fails to set cursor position from frontend
+            let result = virtio_gpu.move_cursor(1, cursor_pos);
+            assert_matches!(result, Err(ErrUnspec));
+        }
+
+        #[test]
+        fn test_process_fence() {
+            let mut virtio_gpu = new_gpu();
+            let fence = RutabagaFence {
+                flags: 0,
+                fence_id: 0,
+                ctx_id: 1,
+                ring_idx: 0,
+            };
+
+            // Test creating a fence with the `RutabagaFence` that can be used to determine when the previous
+            // command completed.
+            let result = virtio_gpu.create_fence(fence);
+            assert_matches!(result, Ok(OkNoData));
+
+            // Test processing gpu fence: If the fence has already been signaled return true
+            let ring = VirtioGpuRing::Global;
+            let result = virtio_gpu.process_fence(ring.clone(), 0, 0, 0);
+            assert_matches!(result, true);
+
+            // Test processing gpu fence: If the fence has not yet been signaled return false
+            let result = virtio_gpu.process_fence(ring, 1, 0, 0);
+            assert_matches!(result, false);
+        }
+
+        #[test]
+        fn test_event_poll() {
+            let virtio_gpu = new_gpu();
+            virtio_gpu.event_poll();
         }
 
         #[test]

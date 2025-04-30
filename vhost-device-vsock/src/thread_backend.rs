@@ -518,7 +518,7 @@ mod tests {
     use tempfile::tempdir;
     use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
     #[cfg(feature = "backend_vsock")]
-    use vsock::{VsockListener, VMADDR_CID_ANY};
+    use vsock::{VsockListener, VMADDR_CID_ANY, VMADDR_CID_LOCAL};
 
     const DATA_LEN: usize = 16;
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
@@ -604,9 +604,13 @@ mod tests {
     #[cfg(feature = "backend_vsock")]
     #[test]
     fn test_vsock_thread_backend_vsock() {
+        VsockListener::bind_with_cid_port(VMADDR_CID_LOCAL, libc::VMADDR_PORT_ANY).expect(
+            "This test uses VMADDR_CID_LOCAL, so the vsock_loopback kernel module must be loaded",
+        );
+
         let _listener = VsockListener::bind_with_cid_port(VMADDR_CID_ANY, VSOCK_PEER_PORT).unwrap();
         let backend_info = BackendType::Vsock(VsockProxyInfo {
-            forward_cid: 1,
+            forward_cid: VMADDR_CID_LOCAL,
             listen_ports: vec![],
         });
 
