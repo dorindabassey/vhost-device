@@ -175,6 +175,8 @@ impl VhostUserGpuBackend {
                 events_clear: 0.into(),
                 num_scanouts: Le32::from(VIRTIO_GPU_MAX_SCANOUTS),
                 num_capsets: Le32::from(gpu_config.capsets().num_capsets()),
+                // SAFETY: sysconf(_SC_PAGESIZE) is always safe and returns the page size.
+                blob_alignment: Le32::from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u32),
             },
             event_idx_enabled: false,
             backend: None,

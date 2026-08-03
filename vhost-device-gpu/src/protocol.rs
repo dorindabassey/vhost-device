@@ -107,6 +107,8 @@ pub struct VirtioGpuConfig {
     pub num_scanouts: Le32,
     /// Maximum number of capability sets supported by the device
     pub num_capsets: Le32,
+    /// Minimum resource blob alignment
+    pub blob_alignment: Le32,
 }
 
 // SAFETY: The layout of the structure is fixed and can be initialized by
@@ -1205,7 +1207,7 @@ mod tests {
     #[test]
     fn test_virtio_gpu_config() {
         // Test VirtioGpuConfig size
-        assert_eq!(std::mem::size_of::<VirtioGpuConfig>(), 16);
+        assert_eq!(std::mem::size_of::<VirtioGpuConfig>(), 20);
     }
 
     #[test]
