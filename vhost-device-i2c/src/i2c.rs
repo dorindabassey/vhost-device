@@ -185,7 +185,8 @@ pub(crate) struct SmbusMsg {
 }
 
 impl SmbusMsg {
-    /// Based on Linux's `drivers/i2c/i2c-core-smbus.c:i2c_smbus_xfer_emulated()`.
+    /// Based on Linux's
+    /// `drivers/i2c/i2c-core-smbus.c:i2c_smbus_xfer_emulated()`.
     ///
     /// These smbus related functions try to reverse what Linux does, only
     /// support basic modes (up to word transfer).

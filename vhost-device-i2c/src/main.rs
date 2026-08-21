@@ -67,7 +67,8 @@ struct I2cArgs {
     socket_count: usize,
 
     /// List of I2C bus and clients in format
-    /// `<bus-name>:<client_addr>[:<client_addr>][,<bus-name>:<client_addr>[:<client_addr>]]`.
+    /// `<bus-name>:<client_addr>[:<client_addr>][,<bus-name>:<client_addr>[:
+    /// <client_addr>]]`.
     #[clap(short = 'l', long)]
     device_list: String,
 }

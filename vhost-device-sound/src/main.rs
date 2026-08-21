@@ -2,8 +2,7 @@
 // Stefano Garzarella <sgarzare@redhat.com>
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use std::os::unix::net::UnixListener;
-use std::os::unix::prelude::*;
+use std::os::unix::{net::UnixListener, prelude::*};
 
 use clap::Parser;
 use vhost::vhost_user::Listener;
@@ -31,9 +30,10 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use clap::Parser;
     use rstest::*;
-    use std::path::PathBuf;
     use vhost_device_sound::BackendType;
 
     use super::*;
