@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 //! An arguments type for the binary interface of this library.
 
-use std::os::fd::RawFd;
-use std::path::PathBuf;
+use std::{os::fd::RawFd, path::PathBuf};
 
 use clap::{ArgGroup, Parser, ValueEnum};
 

@@ -1,13 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use vhost_device_scsi::{
-    scsi::emulation::{
-        block_device::{BlockDevice, FileBackend, MediumRotationRate},
-        target::EmulatedTarget,
-    },
-    vhu_scsi::VhostUserScsiBackend,
-};
-
 use std::{
     fs::File,
     process::exit,
@@ -17,6 +9,13 @@ use std::{
 use clap::Parser;
 use log::{error, warn};
 use thiserror::Error as ThisError;
+use vhost_device_scsi::{
+    scsi::emulation::{
+        block_device::{BlockDevice, FileBackend, MediumRotationRate},
+        target::EmulatedTarget,
+    },
+    vhu_scsi::VhostUserScsiBackend,
+};
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 

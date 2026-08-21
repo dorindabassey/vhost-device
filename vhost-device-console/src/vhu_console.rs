@@ -829,6 +829,7 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
 mod tests {
     use std::io::Cursor;
 
+    use assert_matches::assert_matches;
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{
         desc::{split::Descriptor as SplitDescriptor, RawDescriptor},
@@ -839,7 +840,6 @@ mod tests {
 
     use super::*;
     use crate::DEFAULT_QUEUE_SIZE;
-    use assert_matches::assert_matches;
 
     #[test]
     fn test_vhost_user_console_backend_creation() {

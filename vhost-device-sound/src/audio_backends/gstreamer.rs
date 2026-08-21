@@ -635,8 +635,8 @@ mod tests {
     use super::{test_utils::GStreamerTestHarness, *};
     use crate::{stream::Stream, virtio_sound::*};
 
-    // `GStreamerTestHarness` modifies the process's environment, so this test should
-    // be executed on a forked process.
+    // `GStreamerTestHarness` modifies the process's environment, so this test
+    // should be executed on a forked process.
     rusty_fork_test! {
         #[test]
         fn test_gstreamer_backend_success() {
@@ -669,8 +669,8 @@ mod tests {
         }
     }
 
-    // `GStreamerTestHarness` modifies the process's environment, so this test should
-    // be executed on a forked process.
+    // `GStreamerTestHarness` modifies the process's environment, so this test
+    // should be executed on a forked process.
     rusty_fork_test! {
         #[test]
         fn test_gstreamer_backend_invalid_stream_id() {
@@ -685,8 +685,8 @@ mod tests {
         }
     }
 
-    // `GStreamerTestHarness` modifies the process's environment, so this test should
-    // be executed on a forked process.
+    // `GStreamerTestHarness` modifies the process's environment, so this test
+    // should be executed on a forked process.
     rusty_fork_test! {
         #[test]
         fn test_gstreamer_invalid_stream() {
@@ -722,8 +722,8 @@ mod tests {
         }
     }
 
-    // `GStreamerTestHarness` modifies the process's environment, so this test should
-    // be executed on a forked process.
+    // `GStreamerTestHarness` modifies the process's environment, so this test
+    // should be executed on a forked process.
     rusty_fork_test! {
         #[test]
         fn test_gstreamer_invalid_state_transitions() {
@@ -752,8 +752,8 @@ mod tests {
         }
     }
 
-    // `GStreamerTestHarness` modifies the process's environment, so this test should
-    // be executed on a forked process.
+    // `GStreamerTestHarness` modifies the process's environment, so this test
+    // should be executed on a forked process.
     rusty_fork_test! {
         #[test]
         fn test_gstreamer_invalid_parameters() {
@@ -783,8 +783,8 @@ mod tests {
         }
     }
 
-    // `GStreamerTestHarness` modifies the process's environment, so this test should
-    // be executed on a forked process.
+    // `GStreamerTestHarness` modifies the process's environment, so this test
+    // should be executed on a forked process.
     rusty_fork_test! {
         #[test]
         fn test_gstreamer_mu_law_a_law_caps() {
@@ -819,8 +819,8 @@ mod tests {
         }
     }
 
-    // `GStreamerTestHarness` modifies the process's environment, so this test should
-    // be executed on a forked process.
+    // `GStreamerTestHarness` modifies the process's environment, so this test
+    // should be executed on a forked process.
     rusty_fork_test! {
         #[test]
         fn test_gstreamer_caps_creation() {
@@ -857,8 +857,8 @@ mod tests {
         }
     }
 
-    // `GStreamerTestHarness` modifies the process's environment, so this test should
-    // be executed on a forked process.
+    // `GStreamerTestHarness` modifies the process's environment, so this test
+    // should be executed on a forked process.
     rusty_fork_test! {
         #[test]
         fn test_gstreamer_all_supported_formats() {
@@ -907,8 +907,8 @@ mod tests {
         }
     }
 
-    // `GStreamerTestHarness` modifies the process's environment, so this test should
-    // be executed on a forked process.
+    // `GStreamerTestHarness` modifies the process's environment, so this test
+    // should be executed on a forked process.
     rusty_fork_test! {
         #[test]
         fn test_gstreamer_all_supported_rates() {
@@ -955,8 +955,8 @@ mod tests {
         }
     }
 
-    // `GStreamerTestHarness` modifies the process's environment, so this test should
-    // be executed on a forked process.
+    // `GStreamerTestHarness` modifies the process's environment, so this test
+    // should be executed on a forked process.
     rusty_fork_test! {
         #[test]
         fn test_gstreamer_unknown_format() {
@@ -979,8 +979,8 @@ mod tests {
         }
     }
 
-    // `GStreamerTestHarness` modifies the process's environment, so this test should
-    // be executed on a forked process.
+    // `GStreamerTestHarness` modifies the process's environment, so this test
+    // should be executed on a forked process.
     rusty_fork_test! {
         #[test]
         fn test_gstreamer_unknown_rate() {
@@ -1006,8 +1006,8 @@ mod tests {
         }
     }
 
-    // `GStreamerTestHarness` modifies the process's environment, so this test should
-    // be executed on a forked process.
+    // `GStreamerTestHarness` modifies the process's environment, so this test
+    // should be executed on a forked process.
     rusty_fork_test! {
         #[test]
         fn test_gstreamer_multiple_prepare_release_cycles() {
@@ -1034,8 +1034,8 @@ mod tests {
         }
     }
 
-    // `GStreamerTestHarness` modifies the process's environment, so this test should
-    // be executed on a forked process.
+    // `GStreamerTestHarness` modifies the process's environment, so this test
+    // should be executed on a forked process.
     rusty_fork_test! {
         #[test]
         fn test_gstreamer_different_channel_counts() {
@@ -1066,8 +1066,8 @@ mod tests {
         }
     }
 
-    // `GStreamerTestHarness` modifies the process's environment, so this test should
-    // be executed on a forked process.
+    // `GStreamerTestHarness` modifies the process's environment, so this test
+    // should be executed on a forked process.
     rusty_fork_test! {
         #[test]
         fn test_gstreamer_all_3byte_formats() {
@@ -1104,8 +1104,8 @@ mod tests {
         }
     }
 
-    // `GStreamerTestHarness` modifies the process's environment, so this test should
-    // be executed on a forked process.
+    // `GStreamerTestHarness` modifies the process's environment, so this test
+    // should be executed on a forked process.
     #[cfg(target_endian = "little")]
     rusty_fork_test! {
         #[test]
@@ -1138,8 +1138,8 @@ mod tests {
         }
     }
 
-    // `GStreamerTestHarness` modifies the process's environment, so this test should
-    // be executed on a forked process.
+    // `GStreamerTestHarness` modifies the process's environment, so this test
+    // should be executed on a forked process.
     #[cfg(target_endian = "big")]
     rusty_fork_test! {
         #[test]
