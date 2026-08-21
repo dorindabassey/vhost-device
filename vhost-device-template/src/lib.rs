@@ -14,7 +14,6 @@ use std::{
 };
 
 use backend::VhostUserFooBackend;
-use log::error;
 use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
