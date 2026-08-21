@@ -11,7 +11,6 @@ use std::{
 };
 
 use libgpiod::{chip, line, request, Error as LibGpiodError};
-use log::error;
 use thiserror::Error as ThisError;
 use vm_memory::{ByteValued, Le16, Le32};
 
